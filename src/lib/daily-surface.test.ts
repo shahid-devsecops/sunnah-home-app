@@ -155,4 +155,99 @@ describe("Daily Operating Surface Engine", () => {
     assert.ok(budgetItem);
     assert.ok(budgetItem.value.includes("90%"));
   });
+
+  test("Household Perspective — suppresses personal prayer count, hifz, habits, water, and checkins", () => {
+    const householdData: DailySurfaceData = {
+      ...baseMockData,
+      familyMembers: [
+        { id: "mem_dad", name: "Shahid", role: "admin", chores: [] },
+        { id: "mem_child", name: "Usman", role: "child", chores: [] },
+      ],
+      memberId: undefined, // Household perspective
+      salahLog: { "2026-08-15": { fajr: "ontime", dhuhr: "ontime" } },
+      hifzItems: [{ id: "h1", surah: "Al-Baqarah", pct: 100, lastRevised: "2026-08-10", nextDue: "2026-08-14" }],
+      habits: [{ id: "hab1", name: "Walk after Maghrib", days: [] }],
+      health: { "2026-08-15": { water: 3 } },
+      checkins: {},
+    };
+
+    const thread = buildDailyThread(householdData, "2026-08-15");
+
+    // Prayer countdown present but without personal logged count
+    const prayerItem = thread.find((i) => i.id === "prayer-countdown");
+    assert.ok(prayerItem);
+    assert.equal(prayerItem.detail?.includes("/5 logged"), false);
+
+    // Personal domains suppressed in household view
+    assert.equal(thread.some((i) => i.id === "hifz-due"), false);
+    assert.equal(thread.some((i) => i.id === "habits-summary"), false);
+    assert.equal(thread.some((i) => i.id === "health-water"), false);
+    assert.equal(thread.some((i) => i.id === "mood-checkin"), false);
+  });
+
+  test("Child Perspective — child's clean stores do not leak parent's 5/5 prayers, hifz, habits, or budget alerts", () => {
+    const childData: DailySurfaceData = {
+      ...baseMockData,
+      familyMembers: [
+        { id: "mem_dad", name: "Shahid", role: "admin", chores: [] },
+        { id: "mem_child", name: "Usman", role: "child", chores: [] },
+      ],
+      memberId: "mem_child",
+      salahLog: {}, // Clean child log (0 prayers)
+      hifzItems: [], // Child has no hifz due
+      habits: [], // Child has no unkept habits
+      health: {},
+      checkins: { "2026-08-15": "bright" },
+      expenses: [{ id: "e1", amount: 4800, category: "Groceries", date: "2026-08-12" }],
+      limits: { Groceries: 5000 },
+    };
+
+    const thread = buildDailyThread(childData, "2026-08-15");
+
+    // Prayer countdown shows child's 0/5 logged count
+    const prayerItem = thread.find((i) => i.id === "prayer-countdown");
+    assert.ok(prayerItem);
+    assert.ok(prayerItem.detail?.includes("0/5 logged"));
+
+    // Budget alert strictly suppressed for child
+    assert.equal(thread.some((i) => i.id === "budget-alert"), false);
+
+    // No parent hifz or habits leaking
+    assert.equal(thread.some((i) => i.id === "hifz-due"), false);
+    assert.equal(thread.some((i) => i.id === "habits-summary"), false);
+  });
+
+  test("Adult Perspective — retains personal prayer count, hifz, habits, and budget alert", () => {
+    const adultData: DailySurfaceData = {
+      ...baseMockData,
+      familyMembers: [
+        { id: "mem_dad", name: "Shahid", role: "admin", chores: [] },
+        { id: "mem_child", name: "Usman", role: "child", chores: [] },
+      ],
+      memberId: "mem_dad",
+      salahLog: { "2026-08-15": { fajr: "ontime", dhuhr: "ontime", asr: "ontime" } },
+      hifzItems: [{ id: "h1", surah: "Al-Baqarah", pct: 100, lastRevised: "2026-08-10", nextDue: "2026-08-14" }],
+      habits: [{ id: "hab1", name: "Read 10 pages", days: [] }],
+      health: { "2026-08-15": { water: 3 } },
+      checkins: {},
+      expenses: [{ id: "e1", amount: 4800, category: "Groceries", date: "2026-08-12" }],
+      limits: { Groceries: 5000 },
+    };
+
+    const thread = buildDailyThread(adultData, "2026-08-15");
+
+    // Prayer countdown shows adult's 3/5 logged
+    const prayerItem = thread.find((i) => i.id === "prayer-countdown");
+    assert.ok(prayerItem);
+    assert.ok(prayerItem.detail?.includes("3/5 logged"));
+
+    // Hifz and habits present for adult
+    assert.ok(thread.some((i) => i.id === "hifz-due"));
+    assert.ok(thread.some((i) => i.id === "habits-summary"));
+    assert.ok(thread.some((i) => i.id === "health-water"));
+
+    // Budget alert present for adult
+    assert.ok(thread.some((i) => i.id === "budget-alert"));
+  });
 });
+

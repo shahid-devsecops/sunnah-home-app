@@ -47,6 +47,11 @@ import {
   type FamilyMember,
   useFamilyMigration,
   useSelectedMember,
+  useMemberSalah,
+  useMemberHifz,
+  useMemberHabits,
+  useMemberWater,
+  useMemberCheckins,
   filterTasksForMember,
   filterEventsForMember,
 } from "@/lib/family-model";
@@ -162,15 +167,32 @@ function Today() {
   const [checkins] = useStore<Record<string, string>>("checkins", {});
   const [expenses] = useStore<{ amount: number; date: string }[]>("expenses", []);
   const [limits] = useStore<Record<string, number>>("limits", {});
-  const [hifzItems] = useStore<HifzItem[]>("hifz", []);
   const [routines] = useStore<Routine[]>("routines", []);
   const [family] = useStore<FamilyMember[]>("family", []);
   const [selectedMemberId, , selectedMember] = useSelectedMember();
-  const [salah] = useSalah();
+
+  const [memberSalah] = useMemberSalah(selectedMemberId);
+  const [memberHifz] = useMemberHifz(selectedMemberId);
+  const [memberHabits] = useMemberHabits(selectedMemberId);
+  const [memberWater] = useMemberWater(selectedMemberId);
+  const [memberCheckins] = useMemberCheckins(selectedMemberId);
+
+  const [legacyHabits] = useStore<{ id: string; name: string; days: string[] }[]>("habits", []);
+  const [legacyHealth] = useStore<Record<string, { water: number }>>("health", {});
+  const [legacyCheckins] = useStore<Record<string, string>>("checkins", {});
+  const [legacyHifz] = useStore<HifzItem[]>("hifz", []);
+  const [legacySalah] = useSalah();
+
   const countdown = useNextPrayer();
   const prayers = usePrayers();
   const { isActive: isRamadan, ramadanDay } = useRamadanMode();
   const activeReminders = useReminderEngine();
+
+  const effectiveSalah = family.length === 0 ? legacySalah : (selectedMemberId ? memberSalah : {});
+  const effectiveHifz = family.length === 0 ? legacyHifz : (selectedMemberId ? memberHifz : []);
+  const effectiveHabits = family.length === 0 ? legacyHabits : (selectedMemberId ? memberHabits : []);
+  const effectiveHealth = family.length === 0 ? legacyHealth : (selectedMemberId ? memberWater : {});
+  const effectiveCheckins = family.length === 0 ? legacyCheckins : (selectedMemberId ? memberCheckins : {});
 
   const hour = now?.getHours() ?? 8;
   const scopedTasks = useMemo(
@@ -187,7 +209,7 @@ function Today() {
     [events, selectedMemberId],
   );
   const todayEvents = eventsOn(scopedEvents, today);
-  const loggedSalah = salah[today] ?? {};
+  const loggedSalah = effectiveSalah[today] ?? {};
   const prayed = Object.keys(loggedSalah).length;
   const leftToBuy = grocery.filter((g) => !g.got).length;
 
@@ -198,17 +220,17 @@ function Today() {
         profile,
         prayers,
         nextPrayer: countdown,
-        salahLog: salah,
-        hifzItems,
+        salahLog: effectiveSalah,
+        hifzItems: effectiveHifz,
         isRamadan,
         ramadanDay,
         tasks,
         events,
         meals,
         grocery,
-        habits,
-        health,
-        checkins,
+        habits: effectiveHabits,
+        health: effectiveHealth,
+        checkins: effectiveCheckins,
         expenses,
         limits,
         activeReminders,
@@ -221,17 +243,17 @@ function Today() {
       profile,
       prayers,
       countdown,
-      salah,
-      hifzItems,
+      effectiveSalah,
+      effectiveHifz,
       isRamadan,
       ramadanDay,
       tasks,
       events,
       meals,
       grocery,
-      habits,
-      health,
-      checkins,
+      effectiveHabits,
+      effectiveHealth,
+      effectiveCheckins,
       expenses,
       limits,
       activeReminders,

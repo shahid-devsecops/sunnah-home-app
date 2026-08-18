@@ -180,10 +180,12 @@ export function buildDailyThread(
   }
 
   // 2. Next Prayer Context
+  const isHousehold = Boolean(data.familyMembers && data.familyMembers.length > 0 && data.memberId === undefined);
   const prayedCount = Object.keys(data.salahLog[today] ?? {}).length;
   if (data.nextPrayer) {
     const prayerMinsLeft = data.nextPrayer.hours * 60 + data.nextPrayer.mins;
     const isImminent = prayerMinsLeft <= 30;
+    const detailSuffix = isHousehold ? "" : ` · ${prayedCount}/5 logged`;
 
     items.push({
       id: "prayer-countdown",
@@ -192,7 +194,7 @@ export function buildDailyThread(
       active: isImminent,
       label: isImminent ? "Prayer soon" : "Next prayer",
       value: `${data.nextPrayer.next.name} · ${data.nextPrayer.next.time}`,
-      detail: `in ${data.nextPrayer.hours ? `${data.nextPrayer.hours}h ` : ""}${data.nextPrayer.mins}m · ${prayedCount}/5 logged`,
+      detail: `in ${data.nextPrayer.hours ? `${data.nextPrayer.hours}h ` : ""}${data.nextPrayer.mins}m${detailSuffix}`,
       to: "/deen",
     });
   }
@@ -213,22 +215,24 @@ export function buildDailyThread(
     }
   }
 
-  // 4. Hifz Revisions Due Today (from Hifz scheduler)
-  const hifzQueue = generateHifzRevisionQueue(data.hifzItems, today);
-  if (hifzQueue.dueToday.length > 0) {
-    const firstDue = hifzQueue.dueToday[0]!;
-    items.push({
-      id: "hifz-due",
-      category: "hifz",
-      priority: 4,
-      label: "Muraja'ah",
-      value:
-        hifzQueue.dueToday.length === 1
-          ? `Revise ${firstDue.surah}`
-          : `${hifzQueue.dueToday.length} portions due for revision (${firstDue.surah}…)`,
-      detail: `Retention: ${hifzQueue.summary.averageRetention}% · Keep memorisation firm`,
-      to: "/deen",
-    });
+  // 4. Hifz Revisions Due Today (from Hifz scheduler — personal member domain)
+  if (!isHousehold && data.hifzItems && data.hifzItems.length > 0) {
+    const hifzQueue = generateHifzRevisionQueue(data.hifzItems, today);
+    if (hifzQueue.dueToday.length > 0) {
+      const firstDue = hifzQueue.dueToday[0]!;
+      items.push({
+        id: "hifz-due",
+        category: "hifz",
+        priority: 4,
+        label: "Muraja'ah",
+        value:
+          hifzQueue.dueToday.length === 1
+            ? `Revise ${firstDue.surah}`
+            : `${hifzQueue.dueToday.length} portions due for revision (${firstDue.surah}…)`,
+        detail: `Retention: ${hifzQueue.summary.averageRetention}% · Keep memorisation firm`,
+        to: "/deen",
+      });
+    }
   }
 
   // 5. Calendar Events for Today
@@ -325,9 +329,9 @@ export function buildDailyThread(
     });
   }
 
-  // 9. Habits
-  const habitsHit = data.habits.filter((h) => h.days.includes(today)).length;
-  if (data.habits.length > 0) {
+  // 9. Habits (Personal member domain)
+  if (!isHousehold && data.habits && data.habits.length > 0) {
+    const habitsHit = data.habits.filter((h) => h.days.includes(today)).length;
     const unkept = data.habits.filter((h) => !h.days.includes(today));
     items.push({
       id: "habits-summary",
@@ -340,32 +344,36 @@ export function buildDailyThread(
     });
   }
 
-  // 10. Health: Water intake
-  const water = data.health[today]?.water ?? 0;
-  if (water < 8) {
-    items.push({
-      id: "health-water",
-      category: "health",
-      priority: 8,
-      label: "Water",
-      value: `${water} of 8 glasses`,
-      detail: "Stay hydrated",
-      to: "/me",
-    });
+  // 10. Health: Water intake (Personal member domain)
+  if (!isHousehold && data.health) {
+    const water = data.health[today]?.water ?? 0;
+    if (water < 8) {
+      items.push({
+        id: "health-water",
+        category: "health",
+        priority: 8,
+        label: "Water",
+        value: `${water} of 8 glasses`,
+        detail: "Stay hydrated",
+        to: "/me",
+      });
+    }
   }
 
-  // 11. Wellbeing: Check-in / Mood
-  const mood = data.checkins[today];
-  if (!mood) {
-    items.push({
-      id: "mood-checkin",
-      category: "checkin",
-      priority: 8,
-      label: "Check in",
-      value: "How are you today?",
-      detail: "A quiet moment of reflection",
-      to: "/me",
-    });
+  // 11. Wellbeing: Check-in / Mood (Personal member domain)
+  if (!isHousehold && data.checkins) {
+    const mood = data.checkins[today];
+    if (!mood) {
+      items.push({
+        id: "mood-checkin",
+        category: "checkin",
+        priority: 8,
+        label: "Check in",
+        value: "How are you today?",
+        detail: "A quiet moment of reflection",
+        to: "/me",
+      });
+    }
   }
 
   // 12. Budget Signals (if over 80% or category over limit) — Suppressed for child perspective

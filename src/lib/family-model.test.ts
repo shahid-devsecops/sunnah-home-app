@@ -18,6 +18,13 @@ import {
   getMemberTasks,
   getHouseholdRoutines,
   getMemberRoutines,
+  getMemberStoreKey,
+  getPrimaryFamilyMember,
+  getPrimaryMemberId,
+  readMemberStore,
+  writeMemberStore,
+  migrateMemberStores,
+  MEMBER_PERSONAL_DOMAINS,
 } from "./family-model";
 import { createRoutine } from "./routine-engine";
 import { buildDailyThread, type DailySurfaceData, type TaskRecord, type CalEventRecord } from "./daily-surface";
@@ -566,6 +573,193 @@ describe("Wave 2.0-A — Family Roles & Responsibility Assignment", () => {
 
     assert.ok(morningItems.some((i) => i.id === "task-t_yusuf_fajr"), "Yusuf afterFajr task placed in Morning block");
     assert.equal(afternoonItems.some((i) => i.id === "task-t_ameen_dhuhr"), false, "Ameen task excluded from Yusuf rhythm");
+  });
+});
+
+describe("Wave H2.5-A — Member Data Ownership & Local Partitioning", () => {
+  const mockFamily: FamilyMember[] = [
+    { id: "mem_shahid", name: "Shahid", role: "admin", chores: [] },
+    { id: "mem_fatima", name: "Fatima", role: "member", chores: [] },
+    { id: "mem_usman", name: "Usman", role: "child", age: "7", chores: [] },
+  ];
+
+  // Mock localStorage in Node test environment
+  const mockStorage = new Map<string, string>();
+  const originalWindow = globalThis.window;
+
+  // Setup mock window before tests
+  globalThis.window = {
+    localStorage: {
+      getItem: (key: string) => mockStorage.get(key) ?? null,
+      setItem: (key: string, val: string) => mockStorage.set(key, val),
+      removeItem: (key: string) => mockStorage.delete(key),
+      clear: () => mockStorage.clear(),
+    } as any,
+  } as any;
+
+  test("1. Member key generation — deterministic naming", () => {
+    assert.equal(getMemberStoreKey("mem_usman", "salah"), "mem_usman:salah");
+    assert.equal(getMemberStoreKey("mem_shahid", "hifz"), "mem_shahid:hifz");
+    assert.equal(getMemberStoreKey("mem_usman", "habits"), "mem_usman:habits");
+    assert.equal(getMemberStoreKey("mem_usman", "water"), "mem_usman:water");
+    assert.equal(getMemberStoreKey("mem_usman", "fasting"), "mem_usman:fasting");
+  });
+
+  test("2. Primary member resolution — name match, admin fallback, list fallback", () => {
+    // Exact name match to admin
+    const primaryByName = getPrimaryFamilyMember(mockFamily, "Shahid");
+    assert.equal(primaryByName?.id, "mem_shahid");
+
+    // Case-insensitive name match
+    const primaryCase = getPrimaryFamilyMember(mockFamily, "shahid");
+    assert.equal(primaryCase?.id, "mem_shahid");
+
+    // No profile name provided -> falls back to first admin
+    const primaryAdmin = getPrimaryFamilyMember(mockFamily, undefined);
+    assert.equal(primaryAdmin?.id, "mem_shahid");
+
+    // No admin in list -> falls back to first member
+    const nonAdminFamily: FamilyMember[] = [
+      { id: "mem_a", name: "A", role: "member", chores: [] },
+      { id: "mem_b", name: "B", role: "member", chores: [] },
+    ];
+    assert.equal(getPrimaryFamilyMember(nonAdminFamily, "")?.id, "mem_a");
+
+    // Empty list
+    assert.equal(getPrimaryFamilyMember([], "Shahid"), undefined);
+    assert.equal(getPrimaryMemberId(mockFamily, "Shahid"), "mem_shahid");
+  });
+
+  test("3. Father member store isolation & writing adult data", () => {
+    mockStorage.clear();
+    const fatherSalah = { "2026-08-18": { fajr: "ontime", dhuhr: "ontime" } };
+    writeMemberStore("salah", "mem_shahid", fatherSalah);
+
+    const readBack = readMemberStore<any>("salah", "mem_shahid", {});
+    assert.deepEqual(readBack, fatherSalah);
+
+    // Verify key in storage
+    assert.ok(mockStorage.has("veedu:mem_shahid:salah"));
+  });
+
+  test("4. Child member store isolation & empty child stores", () => {
+    // Child starts with clean empty partition
+    const childSalah = readMemberStore<any>("salah", "mem_usman", {});
+    assert.deepEqual(childSalah, {});
+
+    const childHifz = readMemberStore<any[]>("hifz", "mem_usman", []);
+    assert.deepEqual(childHifz, []);
+
+    const childHabits = readMemberStore<any[]>("habits", "mem_usman", []);
+    assert.deepEqual(childHabits, []);
+  });
+
+  test("5. Writing child Salah does NOT mutate father Salah", () => {
+    mockStorage.clear();
+    const fatherSalah = { "2026-08-18": { fajr: "ontime", dhuhr: "ontime", asr: "ontime", maghrib: "ontime", isha: "ontime" } };
+    const usmanSalah = { "2026-08-18": { asr: "ontime" } };
+
+    writeMemberStore("salah", "mem_shahid", fatherSalah);
+    writeMemberStore("salah", "mem_usman", usmanSalah);
+
+    // Assert father store remains 5 prayers
+    assert.deepEqual(readMemberStore("salah", "mem_shahid", {}), fatherSalah);
+    // Assert child store has only 1 prayer
+    assert.deepEqual(readMemberStore("salah", "mem_usman", {}), usmanSalah);
+    // Assert stores are distinct in storage
+    assert.notEqual(
+      mockStorage.get("veedu:mem_shahid:salah"),
+      mockStorage.get("veedu:mem_usman:salah")
+    );
+  });
+
+  test("6. Writing child Hifz does NOT mutate father Hifz", () => {
+    mockStorage.clear();
+    const fatherHifz = [{ id: "h_dad", surah: "Al-Baqarah", pct: 100 }];
+    const childHifz = [{ id: "h_usman", surah: "An-Naba", pct: 80 }];
+
+    writeMemberStore("hifz", "mem_shahid", fatherHifz);
+    writeMemberStore("hifz", "mem_usman", childHifz);
+
+    assert.deepEqual(readMemberStore("hifz", "mem_shahid", []), fatherHifz);
+    assert.deepEqual(readMemberStore("hifz", "mem_usman", []), childHifz);
+  });
+
+  test("7. Household perspective (undefined memberId) returns fallback with zero leakage", () => {
+    // Household perspective should return fallback
+    assert.deepEqual(readMemberStore("salah", undefined, {}), {});
+    assert.deepEqual(readMemberStore("hifz", undefined, []), []);
+    assert.deepEqual(readMemberStore("habits", undefined, []), []);
+    assert.deepEqual(readMemberStore("water", undefined, {}), {});
+
+    // Writing with undefined memberId is a safe no-op
+    writeMemberStore("salah", undefined, { "2026-08-18": { fajr: "ontime" } });
+    assert.equal(mockStorage.has("veedu:mem_undefined:salah"), false);
+  });
+
+  test("8. Legacy global key compatibility & idempotent migration", () => {
+    mockStorage.clear();
+
+    // Setup legacy un-scoped data
+    const legacySalah = { "2026-08-18": { fajr: "ontime", dhuhr: "ontime", asr: "ontime" } };
+    const legacyHifz = [{ id: "h_legacy", surah: "Yaseen", pct: 100 }];
+    const legacyHabits = [{ id: "hab_1", name: "Read Quran", days: ["2026-08-18"] }];
+    const legacyHealth = { "2026-08-18": { water: 5, weight: "74.0", sleep: "7.0" } };
+
+    mockStorage.set("veedu:salah", JSON.stringify(legacySalah));
+    mockStorage.set("veedu:hifz", JSON.stringify(legacyHifz));
+    mockStorage.set("veedu:habits", JSON.stringify(legacyHabits));
+    mockStorage.set("veedu:health", JSON.stringify(legacyHealth));
+
+    // Run migration for primary member (Shahid)
+    migrateMemberStores("mem_shahid");
+
+    // Verify Shahid partition received legacy data
+    assert.deepEqual(readMemberStore("salah", "mem_shahid", {}), legacySalah);
+    assert.deepEqual(readMemberStore("hifz", "mem_shahid", []), legacyHifz);
+    assert.deepEqual(readMemberStore("habits", "mem_shahid", []), legacyHabits);
+    assert.deepEqual(readMemberStore("water", "mem_shahid", {}), { "2026-08-18": { water: 5 } });
+
+    // Verify child (Usman) did NOT receive legacy data
+    assert.deepEqual(readMemberStore("salah", "mem_usman", {}), {});
+    assert.deepEqual(readMemberStore("hifz", "mem_usman", []), []);
+
+    // Verify legacy keys were preserved
+    assert.ok(mockStorage.has("veedu:salah"));
+    assert.ok(mockStorage.has("veedu:health"));
+
+    // Verify adult-sensitive health (weight, sleep) was NOT placed in member water
+    const migratedWater = readMemberStore<any>("water", "mem_shahid", {});
+    assert.equal(migratedWater["2026-08-18"].weight, undefined);
+    assert.equal(migratedWater["2026-08-18"].sleep, undefined);
+    assert.equal(migratedWater["2026-08-18"].water, 5);
+
+    // Migration idempotency — running again preserves existing partition
+    writeMemberStore("salah", "mem_shahid", { "2026-08-18": { fajr: "ontime", dhuhr: "ontime", asr: "ontime", maghrib: "ontime" } });
+    migrateMemberStores("mem_shahid");
+    assert.equal(Object.keys(readMemberStore<any>("salah", "mem_shahid", {})["2026-08-18"]).length, 4);
+  });
+
+  test("9. Member switching sequence Father -> Usman -> Household -> Father preserves data integrity", () => {
+    mockStorage.clear();
+    writeMemberStore("salah", "mem_shahid", { "2026-08-18": { fajr: "ontime", dhuhr: "ontime" } });
+    writeMemberStore("salah", "mem_usman", { "2026-08-18": { fajr: "ontime" } });
+
+    // 1. View Father
+    let current = readMemberStore<Record<string, Record<string, string>>>("salah", "mem_shahid", {});
+    assert.equal(Object.keys(current["2026-08-18"] ?? {}).length, 2);
+
+    // 2. Switch to Usman
+    current = readMemberStore<Record<string, Record<string, string>>>("salah", "mem_usman", {});
+    assert.equal(Object.keys(current["2026-08-18"] ?? {}).length, 1);
+
+    // 3. Switch to Household
+    current = readMemberStore<Record<string, Record<string, string>>>("salah", undefined, {});
+    assert.deepEqual(current, {});
+
+    // 4. Switch back to Father
+    current = readMemberStore<Record<string, Record<string, string>>>("salah", "mem_shahid", {});
+    assert.equal(Object.keys(current["2026-08-18"] ?? {}).length, 2);
   });
 });
 

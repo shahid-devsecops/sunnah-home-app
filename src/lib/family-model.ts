@@ -236,16 +236,248 @@ export function getMemberRoutines<
   });
 }
 
+// -----------------------------------------------------------------------------
+// MEMBER-SCOPED STORAGE INFRASTRUCTURE (H2.5-A)
+// -----------------------------------------------------------------------------
+
+export const MEMBER_PERSONAL_DOMAINS = [
+  "salah",
+  "fasting",
+  "quran",
+  "hifz",
+  "habits",
+  "water",
+] as const;
+
+export type MemberPersonalDomain = (typeof MEMBER_PERSONAL_DOMAINS)[number];
+
 /**
- * Migration hook. If a user has kids data but no family data,
- * we safely migrate them into the family model.
- * Original data is not deleted, ensuring safe rollback.
+ * Deterministic storage key generator for member-scoped personal data.
+ * When passed to store methods, prefix `veedu:` is automatically applied,
+ * resulting in `veedu:mem_<memberId>:<domain>`.
+ */
+export function getMemberStoreKey(memberId: string, domain: string): string {
+  const cleanId = memberId.startsWith("mem_") ? memberId.slice(4) : memberId;
+  return `mem_${cleanId}:${domain}`;
+}
+
+/**
+ * Resolves the authenticated user's primary FamilyMember record.
+ * Prioritizes:
+ * 1. Matching profile name against an admin / parent or existing member.
+ * 2. First member with canonical 'admin' role.
+ * 3. First member in family list.
+ */
+export function getPrimaryFamilyMember(
+  family?: FamilyMember[] | null,
+  profileName?: string | null
+): FamilyMember | undefined {
+  if (!family || family.length === 0) return undefined;
+
+  if (profileName && profileName.trim()) {
+    const norm = profileName.trim().toLowerCase();
+    // Try matching admin/parent first
+    const adminNameMatch = family.find(
+      (m) =>
+        m &&
+        m.name &&
+        m.name.trim().toLowerCase() === norm &&
+        getCanonicalFamilyRole(m.role) === "admin"
+    );
+    if (adminNameMatch) return adminNameMatch;
+
+    // Try matching any member by name
+    const anyNameMatch = family.find(
+      (m) => m && m.name && m.name.trim().toLowerCase() === norm
+    );
+    if (anyNameMatch) return anyNameMatch;
+  }
+
+  // Fallback to first admin
+  const firstAdmin = family.find(
+    (m) => m && getCanonicalFamilyRole(m.role) === "admin"
+  );
+  if (firstAdmin) return firstAdmin;
+
+  return family[0];
+}
+
+/**
+ * Convenience helper to get primary member ID.
+ */
+export function getPrimaryMemberId(
+  family?: FamilyMember[] | null,
+  profileName?: string | null
+): string | undefined {
+  return getPrimaryFamilyMember(family, profileName)?.id;
+}
+
+/**
+ * Reads a member-scoped store directly (SSR-safe, local-first).
+ * If memberId is undefined (Household), returns fallback.
+ */
+export function readMemberStore<T>(
+  domain: string,
+  memberId: string | undefined,
+  fallback: T
+): T {
+  if (!memberId || typeof window === "undefined") return fallback;
+  const key = getMemberStoreKey(memberId, domain);
+  try {
+    const raw = window.localStorage.getItem(`veedu:${key}`);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Writes to a member-scoped store directly.
+ */
+export function writeMemberStore<T>(
+  domain: string,
+  memberId: string | undefined,
+  value: T
+): void {
+  if (!memberId || typeof window === "undefined") return;
+  const key = getMemberStoreKey(memberId, domain);
+  try {
+    window.localStorage.setItem(`veedu:${key}`, JSON.stringify(value));
+  } catch {
+    /* quota — keep working in memory */
+  }
+}
+
+/**
+ * Reactive, hydration-safe persisted hook for member-scoped personal data.
+ * - When `memberId === undefined` (Household view): strictly isolates and returns `fallback`.
+ * - When `memberId` is provided: reactively loads and updates `veedu:mem_<memberId>:<domain>`.
+ */
+export function useMemberStore<T>(
+  domain: string,
+  memberId: string | undefined,
+  fallback: T
+): readonly [T, (next: T | ((prev: T) => T)) => void, boolean] {
+  const effectiveKey = memberId ? getMemberStoreKey(memberId, domain) : `__noop__:${domain}`;
+  const [storeVal, setStoreVal, ready] = useStore<T>(effectiveKey, fallback);
+
+  const value = memberId !== undefined ? storeVal : fallback;
+
+  const update = useCallback(
+    (next: T | ((prev: T) => T)) => {
+      if (!memberId) return;
+      setStoreVal(next);
+    },
+    [memberId, setStoreVal]
+  );
+
+  return [value, update, ready] as const;
+}
+
+// -----------------------------------------------------------------------------
+// DOMAIN-SPECIFIC MEMBER HOOKS
+// -----------------------------------------------------------------------------
+
+export type SalahLog = Record<string, Record<string, "ontime" | "late">>;
+
+export function useMemberSalah(memberId?: string) {
+  return useMemberStore<SalahLog>("salah", memberId, {});
+}
+
+export function useMemberHifz(memberId?: string) {
+  return useMemberStore<any[]>("hifz", memberId, []);
+}
+
+export function useMemberHabits(memberId?: string) {
+  return useMemberStore<{ id: string; name: string; days: string[] }[]>("habits", memberId, []);
+}
+
+export function useMemberFasting(memberId?: string) {
+  return useMemberStore<Record<string, string>>("fasting", memberId, {});
+}
+
+export function useMemberWater(memberId?: string) {
+  return useMemberStore<Record<string, { water: number }>>("water", memberId, {});
+}
+
+export function useMemberCheckins(memberId?: string) {
+  return useMemberStore<Record<string, string>>("checkins", memberId, {});
+}
+
+/**
+ * Idempotently migrates legacy unpartitioned global personal data
+ * into the primary member's scoped store partition.
+ * Child members and other household members remain completely untouched.
+ * Legacy global keys are preserved for backward compatibility and rollback safety.
+ */
+export function migrateMemberStores(primaryMemberId: string): void {
+  if (typeof window === "undefined" || !primaryMemberId) return;
+
+  // 1. Salah
+  const salahKey = `veedu:${getMemberStoreKey(primaryMemberId, "salah")}`;
+  if (!window.localStorage.getItem(salahKey)) {
+    const legacy = window.localStorage.getItem("veedu:salah");
+    if (legacy) window.localStorage.setItem(salahKey, legacy);
+  }
+
+  // 2. Fasting
+  const fastingKey = `veedu:${getMemberStoreKey(primaryMemberId, "fasting")}`;
+  if (!window.localStorage.getItem(fastingKey)) {
+    const legacy = window.localStorage.getItem("veedu:fasting");
+    if (legacy) window.localStorage.setItem(fastingKey, legacy);
+  }
+
+  // 3. Hifz
+  const hifzKey = `veedu:${getMemberStoreKey(primaryMemberId, "hifz")}`;
+  if (!window.localStorage.getItem(hifzKey)) {
+    const legacy = window.localStorage.getItem("veedu:hifz");
+    if (legacy) window.localStorage.setItem(hifzKey, legacy);
+  }
+
+  // 4. Habits
+  const habitsKey = `veedu:${getMemberStoreKey(primaryMemberId, "habits")}`;
+  if (!window.localStorage.getItem(habitsKey)) {
+    const legacy = window.localStorage.getItem("veedu:habits");
+    if (legacy) window.localStorage.setItem(habitsKey, legacy);
+  }
+
+  // 5. Water (extracted cleanly from legacy health without moving adult health records)
+  const waterKey = `veedu:${getMemberStoreKey(primaryMemberId, "water")}`;
+  if (!window.localStorage.getItem(waterKey)) {
+    const legacyHealthRaw = window.localStorage.getItem("veedu:health");
+    if (legacyHealthRaw) {
+      try {
+        const legacyHealth = JSON.parse(legacyHealthRaw) as Record<string, { water?: number }>;
+        const waterRecord: Record<string, { water: number }> = {};
+        let hasWater = false;
+        for (const [date, val] of Object.entries(legacyHealth)) {
+          if (val && typeof val.water === "number") {
+            waterRecord[date] = { water: val.water };
+            hasWater = true;
+          }
+        }
+        if (hasWater) {
+          window.localStorage.setItem(waterKey, JSON.stringify(waterRecord));
+        }
+      } catch {
+        /* ignore parse error */
+      }
+    }
+  }
+}
+
+/**
+ * Migration hook.
+ * 1. If user has kids data but no family data, migrates into family model.
+ * 2. Migrates primary member personal stores to member-scoped partitions.
  */
 export function useFamilyMigration() {
   const [kids] = useStore<any[]>("kids", []);
   const [family, setFamily] = useStore<FamilyMember[]>("family", []);
+  const [profile] = useStore<{ name?: string }>("profile", {});
 
   useEffect(() => {
+    let effectiveFamily = family;
     if (kids.length > 0 && family.length === 0) {
       const migrated: FamilyMember[] = kids.map((k) => ({
         id: k.id,
@@ -255,6 +487,14 @@ export function useFamilyMigration() {
         chores: k.chores || [],
       }));
       setFamily(migrated);
+      effectiveFamily = migrated;
     }
-  }, [kids, family.length, setFamily]);
+
+    if (effectiveFamily.length > 0) {
+      const primary = getPrimaryFamilyMember(effectiveFamily, profile?.name);
+      if (primary) {
+        migrateMemberStores(primary.id);
+      }
+    }
+  }, [kids, family, profile?.name, setFamily]);
 }
