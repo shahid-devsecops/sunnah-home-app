@@ -812,5 +812,110 @@ describe("Wave H2.5-A — Member Data Ownership & Local Partitioning", () => {
   });
 });
 
+describe("Wave 2.5 Fix B — Default Authenticated Member Perspective (ME / Household / Other)", () => {
+  const mockStorage = new Map<string, string>();
+
+  const family: FamilyMember[] = [
+    { id: "mem_shahid", name: "Shahid", role: "admin", chores: [] },
+    { id: "mem_fatima", name: "Fatima", role: "member", chores: [] },
+    { id: "mem_usman", name: "Usman", role: "child", age: "7", chores: [] },
+  ];
+
+  test("1. Shahid login / first load resolves Shahid as primary member (NEVER Usman)", () => {
+    // 1. Shahid profile with family -> resolves Shahid (admin)
+    const primary = getPrimaryFamilyMember(family, "Shahid");
+    assert.ok(primary);
+    assert.equal(primary.id, "mem_shahid");
+    assert.equal(primary.name, "Shahid");
+    assert.notEqual(primary.id, "mem_usman", "Primary member MUST NOT be a child");
+
+    // 2. Case-insensitive profile name
+    const primaryLower = getPrimaryFamilyMember(family, "shahid");
+    assert.equal(primaryLower?.id, "mem_shahid");
+
+    // 3. Admin fallback when profile name is empty -> resolves Shahid (first admin)
+    const primaryAdmin = getPrimaryFamilyMember(family, "");
+    assert.equal(primaryAdmin?.id, "mem_shahid");
+  });
+
+  test("2. Standalone user or child-only household safely falls back without selecting child", () => {
+    // Standalone (no family members)
+    assert.equal(getPrimaryFamilyMember([], "Shahid"), undefined);
+    assert.equal(getPrimaryFamilyMember(undefined, "Shahid"), undefined);
+
+    // Child-only family list -> MUST NOT return child as authenticated primary user
+    const childOnlyFamily: FamilyMember[] = [
+      { id: "mem_child_1", name: "Usman", role: "child", chores: [] },
+    ];
+    assert.equal(getPrimaryFamilyMember(childOnlyFamily, "Shahid"), undefined);
+  });
+
+  test("3. Missing Shahid member falls back safely to adult member", () => {
+    const otherFamily: FamilyMember[] = [
+      { id: "mem_fatima", name: "Fatima", role: "member", chores: [] },
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+    const resolved = getPrimaryFamilyMember(otherFamily, "Shahid");
+    assert.equal(resolved?.id, "mem_fatima");
+  });
+
+  test("4. Explicit member selection vs explicit Household selection semantics", () => {
+    window.localStorage.clear();
+
+    // 1. Explicit selection of Usman
+    window.localStorage.setItem("veedu:selected_member_id", JSON.stringify("mem_usman"));
+    assert.equal(JSON.parse(window.localStorage.getItem("veedu:selected_member_id")!), "mem_usman");
+
+    // 2. Explicit selection of Household (stored as "household")
+    window.localStorage.setItem("veedu:selected_member_id", JSON.stringify("household"));
+    assert.equal(JSON.parse(window.localStorage.getItem("veedu:selected_member_id")!), "household");
+
+    // 3. Reset perspective removes storage
+    resetSelectedMember();
+    assert.equal(window.localStorage.getItem("veedu:selected_member_id"), null);
+  });
+
+  test("5. Logout clears active perspective and does not bleed into different authenticated user", () => {
+    window.localStorage.clear();
+
+    // User A (Shahid) had explicitly selected Usman
+    window.localStorage.setItem("veedu:selected_member_id", JSON.stringify("mem_usman"));
+
+    // User logs out -> resetSelectedMember removes persisted selection
+    resetSelectedMember();
+    assert.equal(window.localStorage.getItem("veedu:selected_member_id"), null);
+
+    // User B (Fatima) logs in -> fresh resolution resolves Fatima's primary member
+    const fatimaPrimary = getPrimaryFamilyMember(family, "Fatima");
+    assert.equal(fatimaPrimary?.id, "mem_fatima");
+    assert.notEqual(fatimaPrimary?.id, "mem_usman");
+  });
+
+  test("6. Personal Salah isolation across Shahid, Household, and Usman perspectives", () => {
+    mockStorage.clear();
+
+    const shahidSalah = { "2026-08-18": { fajr: "ontime", dhuhr: "ontime", asr: "ontime", maghrib: "ontime", isha: "ontime" } };
+    const usmanSalah = { "2026-08-18": { asr: "ontime" } };
+
+    writeMemberStore("salah", "mem_shahid", shahidSalah);
+    writeMemberStore("salah", "mem_usman", usmanSalah);
+
+    // 1. Shahid view -> sees Shahid's 5 prayers
+    const readShahid = readMemberStore<Record<string, Record<string, string>>>("salah", "mem_shahid", {});
+    assert.deepEqual(readShahid, shahidSalah);
+    assert.equal(Object.keys(readShahid["2026-08-18"]).length, 5);
+
+    // 2. Household view (undefined) -> strictly isolated (empty fallback)
+    const readHousehold = readMemberStore<Record<string, Record<string, string>>>("salah", undefined, {});
+    assert.deepEqual(readHousehold, {});
+
+    // 3. Usman view -> sees Usman's 1 prayer, Shahid's prayers hidden
+    const readUsman = readMemberStore<Record<string, Record<string, string>>>("salah", "mem_usman", {});
+    assert.deepEqual(readUsman, usmanSalah);
+    assert.equal(Object.keys(readUsman["2026-08-18"]).length, 1);
+  });
+});
+
+
 
 

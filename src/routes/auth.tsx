@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Action, Field } from "@/components/veedu/primitives";
 import { useStore, syncFromCloud } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
+import { resetSelectedMember } from "@/lib/family-model";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -85,6 +86,7 @@ function AuthPage() {
                 onClick={async () => {
                   await supabase.auth.signOut();
                   setAccount(null);
+                  resetSelectedMember();
                 }}
               >
                 Sign out

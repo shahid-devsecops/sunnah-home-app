@@ -60,8 +60,13 @@ export function isChildMember(memberId?: string | null, family?: FamilyMember[] 
  * Reusable member-selection hook.
  * Returns [effectiveMemberId, setSelectedMemberId, activeFamilyMember].
  * Persists in local storage under `veedu:selected_member_id`.
- * Safely defaults to `undefined` (Household) if no member or an invalid ID is selected.
- * NEVER automatically selects first member or a child.
+ * 
+ * Default Authenticated Experience:
+ * - Fresh load / no stored preference: defaults to the primary authenticated FamilyMember (ME perspective).
+ * - If no family or no primary member: defaults to undefined (Household).
+ * - Explicit "household" selection: returns undefined (Household).
+ * - Explicit member selection (e.g. child or spouse): returns that member's ID.
+ * - NEVER defaults to a child automatically.
  */
 export function useSelectedMember(): [
   string | undefined,
@@ -70,18 +75,35 @@ export function useSelectedMember(): [
 ] {
   const [selectedId, setSelectedId] = useStore<string | undefined>(SELECTED_MEMBER_KEY, undefined);
   const [family] = useStore<FamilyMember[]>("family", []);
+  const [profile] = useStore<{ name?: string }>("profile", {});
 
-  const activeMember = useMemo(
-    () => (selectedId ? family.find((m) => m && m.id === selectedId) : undefined),
-    [selectedId, family]
+  const primaryMember = useMemo(
+    () => getPrimaryFamilyMember(family, profile?.name),
+    [family, profile?.name]
   );
 
-  // If the stored ID does not match any current family member, fallback safely to Household (undefined)
+  const activeMember = useMemo(() => {
+    // If explicitly set to "household", user wants Household view
+    if (selectedId === "household") {
+      return undefined;
+    }
+    // If a specific valid member ID is selected
+    if (selectedId) {
+      const match = family.find((m) => m && m.id === selectedId);
+      if (match) return match;
+    }
+    // If no preference stored (undefined): default to primary authenticated member
+    if (selectedId === undefined) {
+      return primaryMember;
+    }
+    return undefined;
+  }, [selectedId, family, primaryMember]);
+
   const effectiveId = activeMember ? activeMember.id : undefined;
 
   const setMember = useCallback(
     (id: string | undefined) => {
-      setSelectedId(id || undefined);
+      setSelectedId(id ? id : "household");
     },
     [setSelectedId]
   );
@@ -287,7 +309,7 @@ export function getPrimaryFamilyMember(
 
   if (profileName && profileName.trim()) {
     const norm = profileName.trim().toLowerCase();
-    // Try matching admin/parent first
+    // 1. Try matching admin/parent first
     const adminNameMatch = family.find(
       (m) =>
         m &&
@@ -297,20 +319,38 @@ export function getPrimaryFamilyMember(
     );
     if (adminNameMatch) return adminNameMatch;
 
-    // Try matching any member by name
+    // 2. Try matching any adult/non-child member by name
+    const adultNameMatch = family.find(
+      (m) =>
+        m &&
+        m.name &&
+        m.name.trim().toLowerCase() === norm &&
+        getCanonicalFamilyRole(m.role) !== "child"
+    );
+    if (adultNameMatch) return adultNameMatch;
+
+    // 3. Try matching any member by name
     const anyNameMatch = family.find(
       (m) => m && m.name && m.name.trim().toLowerCase() === norm
     );
     if (anyNameMatch) return anyNameMatch;
   }
 
-  // Fallback to first admin
+  // 4. Fallback to first admin
   const firstAdmin = family.find(
     (m) => m && getCanonicalFamilyRole(m.role) === "admin"
   );
   if (firstAdmin) return firstAdmin;
 
-  return family[0];
+  // 5. Fallback to first adult/non-child member
+  const firstAdult = family.find(
+    (m) => m && getCanonicalFamilyRole(m.role) !== "child"
+  );
+  if (firstAdult) return firstAdult;
+
+  // Fallback to first member ONLY if no children in household or standalone
+  const nonChildFallback = family.find((m) => getCanonicalFamilyRole(m.role) !== "child");
+  return nonChildFallback;
 }
 
 /**

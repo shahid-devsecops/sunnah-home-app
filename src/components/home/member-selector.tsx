@@ -2,6 +2,7 @@ import { Home, User, Users } from "lucide-react";
 import {
   type FamilyMember,
   getCanonicalFamilyRole,
+  getPrimaryFamilyMember,
   useSelectedMember,
 } from "@/lib/family-model";
 import { useStore } from "@/lib/store";
@@ -10,12 +11,15 @@ import { useExperience } from "@/lib/theme-provider";
 export function MemberSelector({ className = "" }: { className?: string }) {
   const { experience } = useExperience();
   const [family] = useStore<FamilyMember[]>("family", []);
+  const [profile] = useStore<{ name?: string }>("profile", {});
   const [selectedMemberId, setSelectedMemberId, activeMember] = useSelectedMember();
 
   if (family.length === 0) {
     return null;
   }
 
+  const primaryMember = getPrimaryFamilyMember(family, profile?.name);
+  const otherMembers = family.filter((m) => m.id !== primaryMember?.id);
   const isVibrant = experience === "vibrant";
 
   if (isVibrant) {
@@ -26,7 +30,32 @@ export function MemberSelector({ className = "" }: { className?: string }) {
           aria-label="Family Perspective"
           className="flex w-max items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--card)_80%,transparent)] p-1 border border-border/60"
         >
-          {/* Household option */}
+          {/* 1. Primary Authenticated Member (You) */}
+          {primaryMember && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={selectedMemberId === primaryMember.id}
+              onClick={() => setSelectedMemberId(primaryMember.id)}
+              className={`press relative flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                selectedMemberId === primaryMember.id
+                  ? "bg-[var(--space-accent)] text-[oklch(0.995_0.008_70)] shadow-[0_4px_14px_-6px_color-mix(in_oklab,var(--space-accent)_90%,transparent)]"
+                  : "text-ink-soft hover:text-foreground hover:bg-[color-mix(in_oklab,var(--space-accent)_8%,transparent)]"
+              }`}
+            >
+              <User className="size-3.5" />
+              <span>{primaryMember.name}</span>
+              <span
+                className={`rounded-full px-1.5 py-0.2 text-[0.65rem] font-bold ${
+                  selectedMemberId === primaryMember.id ? "bg-white/20 text-white" : "bg-black/5 dark:bg-white/10 text-ink-faint"
+                }`}
+              >
+                You
+              </span>
+            </button>
+          )}
+
+          {/* 2. Household option */}
           <button
             type="button"
             role="tab"
@@ -42,8 +71,8 @@ export function MemberSelector({ className = "" }: { className?: string }) {
             <span>Household</span>
           </button>
 
-          {/* Individual family members */}
-          {family.map((m) => {
+          {/* 3. Other family members */}
+          {otherMembers.map((m) => {
             const isSelected = selectedMemberId === m.id;
             const canonicalRole = getCanonicalFamilyRole(m.role);
             return (
@@ -91,6 +120,26 @@ export function MemberSelector({ className = "" }: { className?: string }) {
         aria-label="Family Perspective"
         className="flex w-max items-center gap-1 border-b border-border/50 pb-1"
       >
+        {/* 1. Primary Authenticated Member (You) */}
+        {primaryMember && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedMemberId === primaryMember.id}
+            onClick={() => setSelectedMemberId(primaryMember.id)}
+            className={`press flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors cursor-pointer ${
+              selectedMemberId === primaryMember.id
+                ? "bg-space-soft/70 font-semibold text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-space-soft/30"
+            }`}
+          >
+            <User className="size-3" />
+            <span>{primaryMember.name}</span>
+            <span className="text-[0.65rem] text-muted-foreground opacity-80">(You)</span>
+          </button>
+        )}
+
+        {/* 2. Household option */}
         <button
           type="button"
           role="tab"
@@ -106,7 +155,8 @@ export function MemberSelector({ className = "" }: { className?: string }) {
           <span>Household</span>
         </button>
 
-        {family.map((m) => {
+        {/* 3. Other family members */}
+        {otherMembers.map((m) => {
           const isSelected = selectedMemberId === m.id;
           const canonicalRole = getCanonicalFamilyRole(m.role);
           return (

@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Action, Field } from "@/components/veedu/primitives";
-import { useStore } from "@/lib/store";
+import { useStore, uid } from "@/lib/store";
+import { type FamilyMember, useSelectedMember } from "@/lib/family-model";
 
 export const Route = createFileRoute("/onboarding")({
   head: () => ({
@@ -13,12 +14,35 @@ export const Route = createFileRoute("/onboarding")({
 function OnboardingPage() {
   const navigate = useNavigate();
   const [profile, setProfile] = useStore("profile", { name: "", city: "Kozhikode", gender: "" });
+  const [family, setFamily] = useStore<FamilyMember[]>("family", []);
+  const [, setSelectedMemberId] = useSelectedMember();
   const [localProfile, setLocalProfile] = useState(profile);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!localProfile.name || !localProfile.city || !localProfile.gender) return;
-    setProfile(localProfile);
+    const trimmedName = localProfile.name.trim();
+    setProfile({ ...localProfile, name: trimmedName });
+
+    // Ensure authenticated user has a primary admin FamilyMember
+    const existing = family.find(
+      (m) => m && m.name && m.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    let memberId = existing?.id;
+    if (!existing) {
+      const primaryMember: FamilyMember = {
+        id: uid(),
+        name: trimmedName,
+        role: "admin",
+        chores: [],
+      };
+      setFamily([primaryMember, ...family]);
+      memberId = primaryMember.id;
+    }
+
+    if (memberId) {
+      setSelectedMemberId(memberId);
+    }
     navigate({ to: "/" });
   };
 

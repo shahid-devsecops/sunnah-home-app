@@ -24,7 +24,12 @@ import {
 } from "@/components/veedu/schedule-field";
 import { type Recurrence, isRepeating, nextOccurrence, occursOn } from "@/lib/recurrence";
 import { todayKey, uid, useStore } from "@/lib/store";
-import { type FamilyMember, type Chore } from "@/lib/family-model";
+import {
+  type FamilyMember,
+  type Chore,
+  useSelectedMember,
+  getCanonicalFamilyRole,
+} from "@/lib/family-model";
 import { rankRecipes } from "@/lib/meal-intelligence";
 import { useExperience } from "@/lib/theme-provider";
 
@@ -38,15 +43,15 @@ export type Task = {
   id: string;
   title: string;
   list: string;
-  time?: string;
+  time?: string | undefined;
   done: boolean;
   date: string;
-  recur?: Recurrence;
-  completions?: string[];
-  assigneeId?: string;
-  assignedTo?: string;
-  relativeAnchor?: RelativePrayerAnchor | string;
-  scheduleMode?: ScheduleMode;
+  recur?: Recurrence | undefined;
+  completions?: string[] | undefined;
+  assigneeId?: string | undefined;
+  assignedTo?: string | undefined;
+  relativeAnchor?: RelativePrayerAnchor | string | undefined;
+  scheduleMode?: ScheduleMode | undefined;
 };
 const LISTS = ["General", "Shopping", "Work", "Home"];
 
@@ -58,12 +63,19 @@ export function isTaskDone(t: Task, iso = todayKey()) {
 export function Tasks() {
   const { experience } = useExperience();
   const [tasks, setTasks] = useStore<Task[]>("tasks", []);
+  const [family] = useStore<FamilyMember[]>("family", []);
+  const [selectedMemberId] = useSelectedMember();
   const [list, setList] = useState("General");
   const [filter, setFilter] = useState<"all" | "today" | "done">("all");
   const [title, setTitle] = useState("");
   const [schedule, setSchedule] = useState<ScheduleValue>({ ...EMPTY_SCHEDULE });
   const [recur, setRecur] = useState<Recurrence>({ freq: "none", start: todayKey() });
+  const [assignedTo, setAssignedTo] = useState<string | undefined>(selectedMemberId);
   const today = todayKey();
+
+  useEffect(() => {
+    setAssignedTo(selectedMemberId);
+  }, [selectedMemberId]);
 
   const listTasks = useMemo(() => tasks.filter((t) => t.list === list), [tasks, list]);
   const listDoneCount = useMemo(
@@ -102,6 +114,7 @@ export function Tasks() {
         id: uid(),
         title: title.trim(),
         list,
+        assignedTo: assignedTo || undefined,
         time: (schedule.scheduleMode === "exactTime" ? schedule.time : "") ?? "",
         scheduleMode: schedule.scheduleMode,
         ...(schedule.scheduleMode === "relativePrayer" && schedule.relativeAnchor
@@ -220,6 +233,40 @@ export function Tasks() {
           </div>
           <ScheduleField value={schedule} onChange={setSchedule} idPrefix="task-vibrant" />
           <RecurrenceField value={recur} onChange={setRecur} compact />
+          {family.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+              <span className="text-ink-soft text-[0.75rem] font-medium">Assign:</span>
+              <button
+                type="button"
+                onClick={() => setAssignedTo(undefined)}
+                className={`rounded-full px-2.5 py-0.5 text-xs transition-colors cursor-pointer ${
+                  assignedTo === undefined
+                    ? "bg-[var(--space-accent)] text-white font-semibold"
+                    : "bg-space-soft/70 text-ink-soft hover:text-foreground"
+                }`}
+              >
+                Household
+              </button>
+              {family.map((m) => {
+                const isChild = getCanonicalFamilyRole(m.role) === "child";
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setAssignedTo(m.id)}
+                    className={`rounded-full px-2.5 py-0.5 text-xs transition-colors cursor-pointer ${
+                      assignedTo === m.id
+                        ? "bg-[var(--space-accent)] text-white font-semibold"
+                        : "bg-space-soft/70 text-ink-soft hover:text-foreground"
+                    }`}
+                  >
+                    {m.name}
+                    {isChild ? " (Child)" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </form>
 
         {/* ── Task Items ── */}
@@ -343,6 +390,40 @@ export function Tasks() {
         </div>
         <ScheduleField value={schedule} onChange={setSchedule} idPrefix="task-calm" />
         <RecurrenceField value={recur} onChange={setRecur} compact />
+        {family.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+            <span className="text-ink-soft text-[0.75rem] font-medium">Assign:</span>
+            <button
+              type="button"
+              onClick={() => setAssignedTo(undefined)}
+              className={`rounded-full px-2.5 py-0.5 text-xs transition-colors cursor-pointer ${
+                assignedTo === undefined
+                  ? "bg-[var(--space-accent)] text-white font-semibold"
+                  : "bg-space-soft/70 text-ink-soft hover:text-foreground"
+              }`}
+            >
+              Household
+            </button>
+            {family.map((m) => {
+              const isChild = getCanonicalFamilyRole(m.role) === "child";
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setAssignedTo(m.id)}
+                  className={`rounded-full px-2.5 py-0.5 text-xs transition-colors cursor-pointer ${
+                    assignedTo === m.id
+                      ? "bg-[var(--space-accent)] text-white font-semibold"
+                      : "bg-space-soft/70 text-ink-soft hover:text-foreground"
+                  }`}
+                >
+                  {m.name}
+                  {isChild ? " (Child)" : ""}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </form>
 
       {visible.length === 0 ? (
