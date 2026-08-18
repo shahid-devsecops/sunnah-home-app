@@ -21,6 +21,7 @@ import {
   getMemberStoreKey,
   getAuthenticatedFamilyMember,
   migrateAuthFamilyMemberLink,
+  ensurePrimaryFamilyMember,
   getPrimaryFamilyMember,
   getPrimaryMemberId,
   readMemberStore,
@@ -1150,6 +1151,192 @@ describe("Wave 2.5 Fix B — Default Authenticated Member Perspective (ME / Hous
     assert.deepEqual(readMemberStore("habits", "mem_shahid", []), [{ id: "hab_new", name: "Run", days: [] }]);
   });
 });
+
+describe("Wave 2.5 Fix C — Self Member in Family Roster & Perspective Defaults", () => {
+  const authUserId = "auth_usr_shahid_99";
+
+  test("1. Authenticated user without linked FamilyMember automatically creates/ensures primary FamilyMember", () => {
+    // Household where family only had Usman (e.g. from previous child-only onboarding)
+    const childOnlyFamily: FamilyMember[] = [
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+
+    const { family: reconciled, primaryMember, created } = ensurePrimaryFamilyMember(
+      childOnlyFamily,
+      authUserId,
+      "Shahid"
+    );
+
+    assert.equal(created, true);
+    assert.equal(reconciled.length, 2);
+
+    // Primary member is Shahid with admin role and linked auth ID
+    assert.equal(primaryMember.id, "mem_shahid");
+    assert.equal(primaryMember.name, "Shahid");
+    assert.equal(primaryMember.role, "admin");
+    assert.equal(primaryMember.linkedUserId, authUserId);
+
+    // Usman remains untouched as separate child member
+    const usman = reconciled.find((m) => m.id === "mem_usman");
+    assert.ok(usman);
+    assert.equal(usman.role, "child");
+    assert.equal(usman.linkedUserId, undefined);
+  });
+
+  test("2. Idempotency: Repeated runs NEVER create duplicate Shahid members", () => {
+    const initialFamily: FamilyMember[] = [
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+
+    const run1 = ensurePrimaryFamilyMember(initialFamily, authUserId, "Shahid");
+    assert.equal(run1.created, true);
+    assert.equal(run1.family.length, 2);
+
+    const run2 = ensurePrimaryFamilyMember(run1.family, authUserId, "Shahid");
+    assert.equal(run2.created, false);
+    assert.equal(run2.family.length, 2);
+    assert.equal(run2.family.filter((m) => m.name === "Shahid").length, 1);
+
+    const run3 = ensurePrimaryFamilyMember(run2.family, authUserId, "Shahid");
+    assert.equal(run3.created, false);
+    assert.equal(run3.family.length, 2);
+  });
+
+  test("3. Links existing unlinked Shahid member instead of creating a second one", () => {
+    const unlinkedFamily: FamilyMember[] = [
+      { id: "mem_existing_shahid", name: "Shahid", role: "admin", chores: [] },
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+
+    const { family: reconciled, primaryMember, created } = ensurePrimaryFamilyMember(
+      unlinkedFamily,
+      authUserId,
+      "Shahid"
+    );
+
+    assert.equal(created, false, "Must link existing member, not create a new one");
+    assert.equal(reconciled.length, 2);
+    assert.equal(primaryMember.id, "mem_existing_shahid");
+    assert.equal(primaryMember.linkedUserId, authUserId);
+  });
+
+  test("4. Selector resolution presents YOU (Shahid), HOUSEHOLD, and USMAN (Child)", () => {
+    const family: FamilyMember[] = [
+      { id: "mem_shahid", name: "Shahid", role: "admin", linkedUserId: authUserId, chores: [] },
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+
+    const authMember = getAuthenticatedFamilyMember(family, authUserId);
+    assert.ok(authMember);
+    assert.equal(authMember.id, "mem_shahid");
+    assert.equal(authMember.name, "Shahid");
+
+    const otherMembers = family.filter((m) => m.id !== authMember.id);
+    assert.equal(otherMembers.length, 1);
+    const firstOther = otherMembers[0];
+    assert.ok(firstOther);
+    assert.equal(firstOther.id, "mem_usman");
+    assert.equal(firstOther.name, "Usman");
+    assert.equal(getCanonicalFamilyRole(firstOther.role), "child");
+  });
+
+  test("5. Default perspective on first authenticated load is Shahid (NOT Usman, NOT Household)", () => {
+    const family: FamilyMember[] = [
+      { id: "mem_shahid", name: "Shahid", role: "admin", linkedUserId: authUserId, chores: [] },
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+
+    // 1. Authenticated lookup resolves Shahid
+    const authMember = getAuthenticatedFamilyMember(family, authUserId);
+    assert.equal(authMember?.id, "mem_shahid");
+
+    // 2. Primary fallback resolves Shahid
+    const primary = getPrimaryFamilyMember(family, "Shahid");
+    assert.equal(primary?.id, "mem_shahid");
+    assert.notEqual(primary?.id, "mem_usman");
+  });
+
+  test("6. Explicit perspective switching semantics (Household vs Usman vs Shahid)", () => {
+    window.localStorage.clear();
+
+    const family: FamilyMember[] = [
+      { id: "mem_shahid", name: "Shahid", role: "admin", linkedUserId: authUserId, chores: [] },
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+    ];
+
+    // Explicit Household selection -> stored as "household", effective perspective is undefined
+    window.localStorage.setItem("veedu:selected_member_id", JSON.stringify("household"));
+    const storedHousehold = JSON.parse(window.localStorage.getItem("veedu:selected_member_id")!);
+    assert.equal(storedHousehold, "household");
+
+    // Explicit Usman selection -> stored as "mem_usman"
+    window.localStorage.setItem("veedu:selected_member_id", JSON.stringify("mem_usman"));
+    const storedUsman = JSON.parse(window.localStorage.getItem("veedu:selected_member_id")!);
+    assert.equal(storedUsman, "mem_usman");
+
+    // Explicit Shahid selection -> stored as "mem_shahid"
+    window.localStorage.setItem("veedu:selected_member_id", JSON.stringify("mem_shahid"));
+    const storedShahid = JSON.parse(window.localStorage.getItem("veedu:selected_member_id")!);
+    assert.equal(storedShahid, "mem_shahid");
+  });
+
+  test("7. Task creation defaults across all three perspectives", () => {
+    const tasks: TaskRecord[] = [];
+
+    let idCounter = 1;
+    function createTask(title: string, perspectiveMemberId: string | undefined): TaskRecord {
+      return {
+        id: `t_${idCounter++}`,
+        title,
+        done: false,
+        date: "2026-08-18",
+        assignedTo: perspectiveMemberId || undefined,
+        assigneeId: perspectiveMemberId || undefined,
+      };
+    }
+
+    // 1. Shahid selected: new task defaults to Shahid
+    const taskShahid = createTask("Review quarterly finances", "mem_shahid");
+    assert.equal(taskShahid.assignedTo, "mem_shahid");
+    assert.equal(taskShahid.assigneeId, "mem_shahid");
+    assert.equal(isTaskHousehold(taskShahid), false);
+    assert.equal(isTaskAssignedTo(taskShahid, "mem_shahid"), true);
+
+    // 2. Household selected: new task defaults to unassigned/household
+    const taskHousehold = createTask("Buy groceries for family", undefined);
+    assert.equal(taskHousehold.assignedTo, undefined);
+    assert.equal(taskHousehold.assigneeId, undefined);
+    assert.equal(isTaskHousehold(taskHousehold), true);
+    assert.equal(isTaskAssignedTo(taskHousehold, "mem_shahid"), false);
+
+    // 3. Usman selected: new task defaults to Usman
+    const taskUsman = createTask("Complete Quran recitation", "mem_usman");
+    assert.equal(taskUsman.assignedTo, "mem_usman");
+    assert.equal(taskUsman.assigneeId, "mem_usman");
+    assert.equal(isTaskHousehold(taskUsman), false);
+    assert.equal(isTaskAssignedTo(taskUsman, "mem_usman"), true);
+
+    tasks.push(taskShahid, taskHousehold, taskUsman);
+
+    // Household view shows all 3 tasks
+    assert.equal(filterTasksForMember(tasks, undefined).length, 3);
+
+    // Shahid view shows his task + household task (2 tasks)
+    const shahidTasks = filterTasksForMember(tasks, "mem_shahid");
+    assert.equal(shahidTasks.length, 2);
+    assert.ok(shahidTasks.some((t) => t.id === taskShahid.id));
+    assert.ok(shahidTasks.some((t) => t.id === taskHousehold.id));
+    assert.equal(shahidTasks.some((t) => t.id === taskUsman.id), false);
+
+    // Usman view shows his task + household task (2 tasks)
+    const usmanTasks = filterTasksForMember(tasks, "mem_usman");
+    assert.equal(usmanTasks.length, 2);
+    assert.ok(usmanTasks.some((t) => t.id === taskUsman.id));
+    assert.ok(usmanTasks.some((t) => t.id === taskHousehold.id));
+    assert.equal(usmanTasks.some((t) => t.id === taskShahid.id), false);
+  });
+});
+
 
 
 

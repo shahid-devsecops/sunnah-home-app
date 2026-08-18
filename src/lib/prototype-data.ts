@@ -232,6 +232,32 @@ export function seedPrototypeData(force = false) {
     },
   ]);
 
+  seedKey("family", [
+    {
+      id: "mem_shahid",
+      name: "Shahid",
+      role: "admin",
+      color: "#10b981",
+      chores: [],
+    },
+    {
+      id: "mem_usman",
+      name: "Usman",
+      role: "child",
+      age: "7",
+      color: "#3b82f6",
+      chores: [
+        {
+          id: uid(),
+          title: "Make the bed",
+          done: false,
+          recur: rec("daily", -30),
+          completions: [iso(-1), iso(-2), iso(-3)],
+        },
+      ],
+    },
+  ]);
+
   seedKey("deeds", [
     {
       id: uid(),

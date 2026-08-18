@@ -79,25 +79,20 @@ export function useSelectedMember(): [
   const [family, setFamily] = useStore<FamilyMember[]>("family", []);
   const [account] = useStore<{ id?: string; email: string } | null>("account", null);
   const [profile] = useStore<{ name?: string }>("profile", {});
-
   const authUserId = account?.id;
+  const profileName = profile?.name;
 
-  // Auto-migrate legacy unlinked family member if applicable
+  // Auto-reconcile and ensure authenticated member exists in family
   useEffect(() => {
-    if (authUserId && family.length > 0) {
-      const alreadyLinked = getAuthenticatedFamilyMember(family, authUserId);
-      if (!alreadyLinked) {
-        const { family: migratedFamily, linkedMember } = migrateAuthFamilyMemberLink(
-          family,
-          authUserId,
-          profile?.name
-        );
-        if (linkedMember && migratedFamily !== family) {
-          setFamily(migratedFamily);
-        }
-      }
+    const { family: reconciledFamily, created } = ensurePrimaryFamilyMember(
+      family,
+      authUserId,
+      profileName
+    );
+    if (created || (reconciledFamily !== family && JSON.stringify(reconciledFamily) !== JSON.stringify(family))) {
+      setFamily(reconciledFamily);
     }
-  }, [authUserId, family, profile?.name, setFamily]);
+  }, [authUserId, family, profileName, setFamily]);
 
   const authenticatedMember = useMemo(
     () => getAuthenticatedFamilyMember(family, authUserId),
@@ -428,6 +423,96 @@ export function migrateAuthFamilyMemberLink(
 }
 
 /**
+ * Ensures that the authenticated/profile user is represented in the family roster.
+ * 1. If an existing FamilyMember has linkedUserId === authUserId, returns that member.
+ * 2. If a non-child member matches profileName (or is an adult admin), links authUserId if needed.
+ * 3. If no matching adult member exists (e.g. roster only has children, or is empty),
+ *    creates exactly ONE primary FamilyMember (name: profileName || "Shahid", role: "admin", linkedUserId: authUserId).
+ * 4. Never touches or mutates child members.
+ * 5. Idempotent: repeated runs with the same family & user do not create duplicate records.
+ */
+export function ensurePrimaryFamilyMember(
+  family?: FamilyMember[] | null,
+  authUserId?: string | null,
+  profileName?: string | null
+): { family: FamilyMember[]; primaryMember: FamilyMember; created: boolean } {
+  const safeFamily = Array.isArray(family) ? [...family] : [];
+  const trimmedAuthId = authUserId?.trim() || undefined;
+  const effectiveName = (profileName && profileName.trim()) || "Shahid";
+
+  // 1. Check if already linked to authUserId
+  if (trimmedAuthId) {
+    const linked = safeFamily.find((m) => m && m.linkedUserId === trimmedAuthId);
+    if (linked) {
+      return { family: safeFamily, primaryMember: linked, created: false };
+    }
+  }
+
+  // 2. Check if a non-child member matches profileName
+  const normName = effectiveName.toLowerCase();
+  const nameMatchIndex = safeFamily.findIndex(
+    (m) =>
+      m &&
+      m.name &&
+      m.name.trim().toLowerCase() === normName &&
+      getCanonicalFamilyRole(m.role) !== "child" &&
+      (!m.linkedUserId || m.linkedUserId === trimmedAuthId)
+  );
+
+  if (nameMatchIndex !== -1) {
+    const existing = safeFamily[nameMatchIndex]!;
+    const updated: FamilyMember =
+      trimmedAuthId && !existing.linkedUserId
+        ? { ...existing, linkedUserId: trimmedAuthId }
+        : existing;
+    if (updated !== existing) {
+      safeFamily[nameMatchIndex] = updated;
+    }
+    return { family: safeFamily, primaryMember: updated, created: false };
+  }
+
+  // 3. Check if there is an unlinked adult admin
+  const adminIndex = safeFamily.findIndex(
+    (m) =>
+      m &&
+      getCanonicalFamilyRole(m.role) === "admin" &&
+      (!m.linkedUserId || m.linkedUserId === trimmedAuthId)
+  );
+
+  if (adminIndex !== -1) {
+    const existing = safeFamily[adminIndex]!;
+    const updated: FamilyMember =
+      trimmedAuthId && !existing.linkedUserId
+        ? { ...existing, linkedUserId: trimmedAuthId }
+        : existing;
+    if (updated !== existing) {
+      safeFamily[adminIndex] = updated;
+    }
+    return { family: safeFamily, primaryMember: updated, created: false };
+  }
+
+  // 4. No adult primary member exists -> create exactly ONE primary admin FamilyMember
+  const baseId = `mem_${effectiveName.toLowerCase().replace(/[^a-z0-9]/g, "_") || "self"}`;
+  let uniqueId = baseId;
+  let counter = 1;
+  while (safeFamily.some((m) => m && m.id === uniqueId)) {
+    uniqueId = `${baseId}_${counter++}`;
+  }
+
+  const newPrimary: FamilyMember = {
+    id: uniqueId,
+    name: effectiveName,
+    role: "admin",
+    linkedUserId: trimmedAuthId,
+    color: "#10b981",
+    chores: [],
+  };
+
+  const newFamily = [newPrimary, ...safeFamily];
+  return { family: newFamily, primaryMember: newPrimary, created: true };
+}
+
+/**
  * Resolves the authenticated user's primary FamilyMember record.
  * Prioritizes:
  * 1. Matching profile name against an admin / parent or existing member.
@@ -686,32 +771,47 @@ export function migrateMemberStores(primaryMemberId: string): void {
 /**
  * Migration hook.
  * 1. If user has kids data but no family data, migrates into family model.
- * 2. Migrates primary member personal stores to member-scoped partitions.
+ * 2. Ensures the authenticated/primary user is present in the family roster.
+ * 3. Migrates primary member personal stores to member-scoped partitions.
  */
 export function useFamilyMigration() {
   const [kids] = useStore<any[]>("kids", []);
   const [family, setFamily] = useStore<FamilyMember[]>("family", []);
   const [profile] = useStore<{ name?: string }>("profile", {});
+  const [account] = useStore<{ id?: string; email: string } | null>("account", null);
 
   useEffect(() => {
-    let effectiveFamily = family;
-    if (kids.length > 0 && family.length === 0) {
-      const migrated: FamilyMember[] = kids.map((k) => ({
+    let currentFamily = Array.isArray(family) ? [...family] : [];
+    let changed = false;
+
+    // 1. If kids exists but family has no children, migrate kids
+    if (kids.length > 0 && !currentFamily.some((m) => getCanonicalFamilyRole(m.role) === "child")) {
+      const migratedKids: FamilyMember[] = kids.map((k) => ({
         id: k.id,
         name: k.name,
         role: "child",
         age: k.age || "",
         chores: k.chores || [],
       }));
-      setFamily(migrated);
-      effectiveFamily = migrated;
+      currentFamily = [...currentFamily, ...migratedKids];
+      changed = true;
     }
 
-    if (effectiveFamily.length > 0) {
-      const primary = getPrimaryFamilyMember(effectiveFamily, profile?.name);
-      if (primary) {
-        migrateMemberStores(primary.id);
-      }
+    // 2. Ensure authenticated user has a primary FamilyMember in family
+    const { family: reconciledFamily, primaryMember, created } = ensurePrimaryFamilyMember(
+      currentFamily,
+      account?.id,
+      profile?.name
+    );
+
+    if (created || (reconciledFamily !== currentFamily && JSON.stringify(reconciledFamily) !== JSON.stringify(currentFamily)) || changed) {
+      setFamily(reconciledFamily);
+      currentFamily = reconciledFamily;
     }
-  }, [kids, family, profile?.name, setFamily]);
+
+    // 3. Migrate member stores for primary
+    if (primaryMember) {
+      migrateMemberStores(primaryMember.id);
+    }
+  }, [kids, family, profile?.name, account?.id, setFamily]);
 }

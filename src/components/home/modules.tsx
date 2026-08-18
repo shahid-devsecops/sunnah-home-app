@@ -115,6 +115,7 @@ export function Tasks() {
         title: title.trim(),
         list,
         assignedTo: assignedTo || undefined,
+        assigneeId: assignedTo || undefined,
         time: (schedule.scheduleMode === "exactTime" ? schedule.time : "") ?? "",
         scheduleMode: schedule.scheduleMode,
         ...(schedule.scheduleMode === "relativePrayer" && schedule.relativeAnchor
