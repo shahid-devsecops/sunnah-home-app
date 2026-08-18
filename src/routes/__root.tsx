@@ -14,6 +14,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { useReminderEngine } from "../components/home/reminders";
+import { useFamilyMigration } from "../lib/family-model";
 import { registerServiceWorker } from "../lib/pwa";
 import { isExperienceId, DEFAULT_EXPERIENCE, type ExperienceId } from "../lib/experiences";
 import { isThemeId, DEFAULT_THEME, type ThemeId, type ColorMode } from "../lib/themes";
@@ -200,6 +201,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const loaderData = Route.useLoaderData();
   useReminderEngine();
+  useFamilyMigration();
 
   useEffect(() => {
     registerServiceWorker();
