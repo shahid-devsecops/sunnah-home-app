@@ -4,6 +4,14 @@ import { Action, EmptyState, Field, Meter, Section, Tick } from "@/components/ve
 import { PageHero, HeroFigure, type HeroPill } from "@/components/veedu/page-hero";
 import { useExperience } from "@/lib/theme-provider";
 import { todayKey, uid, useStore } from "@/lib/store";
+import {
+  useSelectedMember,
+  useMemberCheckins,
+  useMemberHabits,
+  useMemberWater,
+  useMemberStore,
+  getCanonicalFamilyRole,
+} from "@/lib/family-model";
 
 const MOODS = [
   { id: "bright", label: "Bright", glyph: "☀" },
@@ -15,7 +23,12 @@ const MOODS = [
 
 export function SelfCare() {
   const { experience } = useExperience();
-  const [checkins, setCheckins] = useStore<Record<string, string>>("checkins", {});
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [checkins, setCheckins] = useMemberCheckins(selectedMemberId);
+  const [waterLog] = useMemberWater(selectedMemberId);
+  const [done, setDone] = useMemberStore<Record<string, string[]>>("rituals", selectedMemberId, {});
+  
   const today = checkins[todayKey()];
   const rituals = [
     "Step outside for a few minutes",
@@ -23,10 +36,8 @@ export function SelfCare() {
     "Message someone you love",
     "Sit quietly without a screen",
   ];
-  const [done, setDone] = useStore<Record<string, string[]>>("rituals", {});
   const todayDone = done[todayKey()] ?? [];
-  const [health] = useStore<Record<string, { water?: number }>>("health", {});
-  const water = health[todayKey()]?.water ?? 0;
+  const water = waterLog[todayKey()]?.water ?? 0;
 
   const moodButtons = (
     <div className="flex flex-wrap gap-2">
@@ -35,12 +46,16 @@ export function SelfCare() {
         return (
           <button
             key={m.id}
-            onClick={() => setCheckins({ ...checkins, [todayKey()]: m.id })}
+            onClick={() => {
+              if (isHousehold) return;
+              setCheckins({ ...checkins, [todayKey()]: m.id });
+            }}
             aria-pressed={active}
             className="press flex min-w-[84px] flex-col items-center gap-1.5 rounded-2xl border px-4 py-4"
             style={{
               borderColor: active ? "var(--space-accent)" : "var(--rule)",
               background: active ? "var(--space-accent-soft)" : "transparent",
+              cursor: isHousehold ? "default" : "pointer",
             }}
           >
             <span className="text-xl leading-none">{m.glyph}</span>
@@ -52,22 +67,36 @@ export function SelfCare() {
   );
 
   const ritualsList = (
-    <Section eyebrow="Small things" title="Today's rituals">
+    <Section
+      eyebrow={isHousehold ? "Small things" : activeMember ? `${activeMember.name}'s rituals` : "Small things"}
+      title="Today's rituals"
+      aside={
+        isHousehold ? (
+          <span className="text-ink-faint text-xs">
+            Select a member above to record personal daily rituals
+          </span>
+        ) : undefined
+      }
+    >
       <ul className="thread">
         {rituals.map((r) => {
           const isDone = todayDone.includes(r);
           return (
             <li key={r} data-done={isDone} className="thread-node flex items-center gap-3 py-2.5">
-              <Tick
-                done={isDone}
-                label={r}
-                onToggle={() =>
-                  setDone({
-                    ...done,
-                    [todayKey()]: isDone ? todayDone.filter((x) => x !== r) : [...todayDone, r],
-                  })
-                }
-              />
+              {!isHousehold ? (
+                <Tick
+                  done={isDone}
+                  label={r}
+                  onToggle={() =>
+                    setDone({
+                      ...done,
+                      [todayKey()]: isDone ? todayDone.filter((x) => x !== r) : [...todayDone, r],
+                    })
+                  }
+                />
+              ) : (
+                <span className="size-2 rounded-full bg-[var(--space-accent)]/60 flex-none" />
+              )}
               <span className={`text-[0.95rem] ${isDone ? "text-ink-faint line-through" : ""}`}>
                 {r}
               </span>
@@ -81,39 +110,71 @@ export function SelfCare() {
   if (experience === "vibrant") {
     const activeMood = MOODS.find((m) => m.id === today);
     const pills: HeroPill[] = [
-      {
-        id: "mood",
-        icon: HeartPulse,
-        label: activeMood ? `${activeMood.glyph} ${activeMood.label}` : "Daily Check-in",
-      },
-      {
-        id: "rituals",
-        icon: CheckCircle2,
-        label: `${todayDone.length}/${rituals.length} rituals`,
-      },
-      {
-        id: "water",
-        icon: Droplets,
-        label: `${water} glass${water === 1 ? "" : "es"} water`,
-      },
+      ...(!isHousehold
+        ? [
+            {
+              id: "mood",
+              icon: HeartPulse,
+              label: activeMood ? `${activeMood.glyph} ${activeMood.label}` : "Daily Check-in",
+            },
+            {
+              id: "rituals",
+              icon: CheckCircle2,
+              label: `${todayDone.length}/${rituals.length} rituals`,
+            },
+            {
+              id: "water",
+              icon: Droplets,
+              label: `${water} glass${water === 1 ? "" : "es"} water`,
+            },
+          ]
+        : [
+            {
+              id: "household-note",
+              icon: Sparkles,
+              label: "Family Perspective",
+            },
+          ]),
     ];
 
     return (
       <div className="space-y-10">
         <PageHero
           variant="me"
-          eyebrow="Personal Wellbeing · Private & On-Device"
-          title={activeMood ? `Feeling ${activeMood.label}` : "How are you, really?"}
+          eyebrow={isHousehold ? "Household Space" : activeMember ? `${activeMember.name}'s Corner` : "Personal Wellbeing"}
+          title={
+            isHousehold
+              ? "Family & Household Wellbeing"
+              : activeMood
+                ? `Feeling ${activeMood.label}`
+                : "How are you, really?"
+          }
           subtitle={
-            todayDone.length === rituals.length
-              ? "All daily rituals completed for today. Well done."
-              : `${todayDone.length} of ${rituals.length} daily rituals completed · ${water} glasses water`
+            isHousehold
+              ? "Select an individual family member above to log check-ins, water, habits, and rituals."
+              : todayDone.length === rituals.length
+                ? "All daily rituals completed for today. Well done."
+                : `${todayDone.length} of ${rituals.length} daily rituals completed · ${water} glasses water`
           }
           pills={pills}
-          aside={<HeroFigure value={`${todayDone.length}/${rituals.length}`} label="Rituals" />}
+          aside={
+            !isHousehold ? (
+              <HeroFigure value={`${todayDone.length}/${rituals.length}`} label="Rituals" />
+            ) : undefined
+          }
         />
 
-        <Section eyebrow="Check in" title="How are you feeling?">
+        <Section
+          eyebrow="Check in"
+          title="How are you feeling?"
+          aside={
+            isHousehold ? (
+              <span className="text-ink-faint text-xs">
+                Select a member above to record mood
+              </span>
+            ) : undefined
+          }
+        >
           {moodButtons}
         </Section>
 
@@ -126,7 +187,9 @@ export function SelfCare() {
     <div className="space-y-10">
       <section className="rise">
         <p className="eyebrow">Check in</p>
-        <h1 className="display-lg mt-2">How are you, really?</h1>
+        <h1 className="display-lg mt-2">
+          {isHousehold ? "Family Wellbeing" : "How are you, really?"}
+        </h1>
         <div className="mt-6">{moodButtons}</div>
       </section>
 
@@ -138,7 +201,9 @@ export function SelfCare() {
 type Habit = { id: string; name: string; days: string[] };
 
 export function Habits() {
-  const [habits, setHabits] = useStore<Habit[]>("habits", []);
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [habits, setHabits] = useMemberHabits(selectedMemberId);
   const [name, setName] = useState("");
   const week = [...Array(7)].map((_, i) => {
     const d = new Date();
@@ -157,8 +222,23 @@ export function Habits() {
     return s;
   }
 
+  if (isHousehold) {
+    return (
+      <Section eyebrow="Quietly repeated" title="Habits">
+        <EmptyState
+          glyph="❋"
+          headline="Personal Habits"
+          body="Habits are kept per family member. Select a member above to track and build individual daily streaks."
+        />
+      </Section>
+    );
+  }
+
   return (
-    <Section eyebrow="Quietly repeated" title="Habits">
+    <Section
+      eyebrow={activeMember ? `${activeMember.name}'s streaks` : "Quietly repeated"}
+      title="Habits"
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -231,6 +311,10 @@ export function Habits() {
 }
 
 export function Journal() {
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isChild = activeMember ? getCanonicalFamilyRole(activeMember.role) === "child" : false;
+  const isHousehold = selectedMemberId === undefined;
+
   const [entries, setEntries] = useStore<Record<string, { mood: string; text: string }>>(
     "journal",
     {},
@@ -240,6 +324,30 @@ export function Journal() {
   const past = Object.entries(entries)
     .filter(([d]) => d !== todayKey())
     .sort((a, b) => b[0].localeCompare(a[0]));
+
+  if (isChild) {
+    return (
+      <Section eyebrow="Private space" title="Journal">
+        <EmptyState
+          glyph="🔒"
+          headline="Private to Account Owner"
+          body="Personal journaling is kept strictly private to the authenticated account owner and is never exposed in child perspectives."
+        />
+      </Section>
+    );
+  }
+
+  if (isHousehold) {
+    return (
+      <Section eyebrow="Private space" title="Journal">
+        <EmptyState
+          glyph="🔒"
+          headline="Account Private Journal"
+          body="Journal entries are private to the authenticated account owner. Switch to your personal profile tab to read and write entries."
+        />
+      </Section>
+    );
+  }
 
   return (
     <div className="space-y-10">
@@ -292,10 +400,15 @@ export function Journal() {
 }
 
 export function Health() {
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [waterLog, setWaterLog] = useMemberWater(selectedMemberId);
+  const water = waterLog[todayKey()]?.water ?? 0;
+
   const [metrics, setMetrics] = useStore<
-    Record<string, { water: number; weight: string; sleep: string }>
+    Record<string, { weight: string; sleep: string }>
   >("health", {});
-  const today = metrics[todayKey()] ?? { water: 0, weight: "", sleep: "" };
+  const today = metrics[todayKey()] ?? { weight: "", sleep: "" };
   const [workouts, setWorkouts] = useStore<
     { id: string; name: string; detail: string; date: string }[]
   >("workouts", []);
@@ -305,24 +418,40 @@ export function Health() {
     setMetrics({ ...metrics, [todayKey()]: { ...today, ...patch } });
   }
 
+  function setWater(amount: number) {
+    if (isHousehold) return;
+    setWaterLog({ ...waterLog, [todayKey()]: { water: amount } });
+  }
+
   return (
     <div className="space-y-10">
-      <Section eyebrow="Today" title="Body">
+      <Section
+        eyebrow={isHousehold ? "Today" : activeMember ? `${activeMember.name}'s hydration` : "Today"}
+        title="Body"
+        aside={
+          isHousehold ? (
+            <span className="text-ink-faint text-xs">
+              Select a member above to record water
+            </span>
+          ) : undefined
+        }
+      >
         <div className="mb-6">
           <div className="mb-2 flex items-baseline justify-between">
             <span className="eyebrow">Water</span>
-            <span className="numeric font-display text-lg">{today.water} / 8</span>
+            <span className="numeric font-display text-lg">{water} / 8</span>
           </div>
           <div className="flex gap-1.5">
             {[...Array(8)].map((_, i) => (
               <button
                 key={i}
                 aria-label={`${i + 1} glasses`}
-                onClick={() => set({ water: today.water === i + 1 ? i : i + 1 })}
+                onClick={() => setWater(water === i + 1 ? i : i + 1)}
                 className="press h-10 flex-1 rounded-lg border"
                 style={{
-                  background: i < today.water ? "var(--space-accent)" : "transparent",
-                  borderColor: i < today.water ? "transparent" : "var(--rule)",
+                  background: i < water ? "var(--space-accent)" : "transparent",
+                  borderColor: i < water ? "transparent" : "var(--rule)",
+                  cursor: isHousehold ? "default" : "pointer",
                 }}
               />
             ))}

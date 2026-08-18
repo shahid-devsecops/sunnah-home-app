@@ -21,6 +21,15 @@ import { CheckCircle2, Moon, Sparkles } from "lucide-react";
 import { useExperience } from "@/lib/theme-provider";
 import { useRamadanMode } from "@/lib/ramadan";
 import { PageHero, HeroFigure, type HeroPill } from "@/components/veedu/page-hero";
+import {
+  useSelectedMember,
+  useMemberSalah,
+  useMemberHifz,
+  useMemberFasting,
+  useMemberQuranBookmarks,
+  useMemberQuranSessions,
+  useMemberStore,
+} from "@/lib/family-model";
 
 export function usePrayers(date = new Date()) {
   const [profile] = useStore("profile", {
@@ -39,13 +48,25 @@ export function usePrayers(date = new Date()) {
     const pMethod = profile.method ?? "MuslimWorldLeague";
     const pMadhab = profile.madhab ?? "shafi";
 
-    const coordinates = new Coordinates(pLat, pLng);
-    let params = (CalculationMethod as any)[pMethod]
-      ? (CalculationMethod as any)[pMethod]()
-      : CalculationMethod.MuslimWorldLeague();
+    const coords = new Coordinates(pLat, pLng);
+    const params =
+      pMethod === "Karachi"
+        ? CalculationMethod.Karachi()
+        : pMethod === "NorthAmerica"
+          ? CalculationMethod.NorthAmerica()
+          : pMethod === "Dubai"
+            ? CalculationMethod.Dubai()
+            : pMethod === "Qatar"
+              ? CalculationMethod.Qatar()
+              : pMethod === "Kuwait"
+                ? CalculationMethod.Kuwait()
+                : pMethod === "MoonsightingCommittee"
+                  ? CalculationMethod.MoonsightingCommittee()
+                  : CalculationMethod.MuslimWorldLeague();
+
     params.madhab = pMadhab === "hanafi" ? Madhab.Hanafi : Madhab.Shafi;
 
-    const prayerTimes = new PrayerTimes(coordinates, date, params);
+    const prayerTimes = new PrayerTimes(coords, date, params);
 
     const formatTime = (d: Date) => {
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -61,10 +82,12 @@ export function usePrayers(date = new Date()) {
   }, [profile, date.toISOString().slice(0, 10)]);
 }
 
-type SalahLog = Record<string, Record<string, "ontime" | "late">>;
+export type SalahLog = Record<string, Record<string, "ontime" | "late">>;
 
-export function useSalah() {
-  return useStore<SalahLog>("salah", {});
+export function useSalah(memberId?: string) {
+  const [selectedMemberId] = useSelectedMember();
+  const effectiveId = memberId !== undefined ? memberId : selectedMemberId;
+  return useMemberSalah(effectiveId);
 }
 
 function minutes(t: string) {
@@ -87,7 +110,9 @@ export function useNextPrayer() {
 
 export function DeenHero() {
   const { experience } = useExperience();
-  const [log] = useSalah();
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [log] = useSalah(selectedMemberId);
   const [profile] = useStore("profile", { name: "", city: "Kozhikode" });
   const countdown = useNextPrayer();
   const today = log[todayKey()] ?? {};
@@ -105,18 +130,24 @@ export function DeenHero() {
               label: `${countdown.next.name} · ${countdown.next.time}`,
             },
           ]
-        : [
+        : !isHousehold
+          ? [
+              {
+                id: "completed",
+                icon: CheckCircle2,
+                label: "All 5 prayers completed",
+              },
+            ]
+          : []),
+      ...(!isHousehold
+        ? [
             {
-              id: "completed",
+              id: "count",
               icon: CheckCircle2,
-              label: "All 5 prayers completed",
+              label: `${count} of 5 logged`,
             },
-          ]),
-      {
-        id: "count",
-        icon: CheckCircle2,
-        label: `${count} of 5 logged`,
-      },
+          ]
+        : []),
       ...(isFriday
         ? [
             {
@@ -154,12 +185,22 @@ export function DeenHero() {
             "Peace be upon you"
           )
         }
-        subtitle={`${count} of 5 prayers logged today · Next at ${countdown?.next.time ?? "—"}${
-          isFriday ? " · Blessed Friday" : ""
-        }`}
+        subtitle={
+          isHousehold
+            ? `Next prayer at ${countdown?.next.time ?? "—"}${isFriday ? " · Blessed Friday" : ""}`
+            : `${count} of 5 prayers logged today · Next at ${countdown?.next.time ?? "—"}${
+                isFriday ? " · Blessed Friday" : ""
+              }`
+        }
         arabic="حَافِظُوا عَلَى الصَّلَوَاتِ وَالصَّلَاةِ الْوُسْطَىٰ"
         pills={pills}
-        aside={<HeroFigure value={`${count}/5`} label="Logged" />}
+        aside={
+          !isHousehold ? (
+            <HeroFigure value={`${count}/5`} label={activeMember ? `${activeMember.name}'s Logged` : "Logged"} />
+          ) : countdown ? (
+            <HeroFigure value={countdown.next.name} label={`At ${countdown.next.time}`} />
+          ) : undefined
+        }
       />
     );
   }
@@ -181,7 +222,9 @@ export function DeenHero() {
         )}
       </h1>
       <p className="text-muted-foreground mt-3 text-sm">
-        {count} of 5 logged today · {countdown?.next.time ?? "—"}
+        {isHousehold
+          ? `Next prayer at ${countdown?.next.time ?? "—"}`
+          : `${count} of 5 logged today · ${countdown?.next.time ?? "—"}`}
       </p>
       {isFriday && (
         <p className="border-space/50 text-ink-soft mt-5 border-l-2 pl-4 text-sm italic">
@@ -237,13 +280,16 @@ export function DailyVerse() {
 }
 
 export function Salah() {
-  const [log, setLog] = useSalah();
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [log, setLog] = useSalah(selectedMemberId);
   const today = log[todayKey()] ?? {};
   const prayers = usePrayers();
   const week = useMemo(() => getWeekRange(new Date()), []);
   const analytics = useMemo(() => calculateSalahAnalytics(log, week), [log, week]);
 
   function mark(id: string, state: "ontime" | "late") {
+    if (isHousehold) return;
     const day = { ...(log[todayKey()] ?? {}) };
     if (day[id] === state) delete day[id];
     else day[id] = state;
@@ -252,7 +298,17 @@ export function Salah() {
 
   return (
     <div className="space-y-10">
-      <Section eyebrow="Today" title="Salah">
+      <Section
+        eyebrow={isHousehold ? "Universal rhythm" : activeMember ? `${activeMember.name}'s rhythm` : "Today"}
+        title="Salah"
+        aside={
+          isHousehold ? (
+            <span className="text-ink-faint text-xs">
+              Select a member above to record individual prayer
+            </span>
+          ) : undefined
+        }
+      >
         <ul className="thread">
           {prayers.map((p) => {
             const state = today[p.id];
@@ -262,67 +318,74 @@ export function Salah() {
                 data-done={!!state}
                 className="thread-node flex items-center gap-3 py-3"
               >
-                <Tick done={!!state} label={p.name} onToggle={() => mark(p.id, "ontime")} />
+                {!isHousehold ? (
+                  <Tick done={!!state} label={p.name} onToggle={() => mark(p.id, "ontime")} />
+                ) : (
+                  <span className="size-2 rounded-full bg-[var(--space-accent)]/60 flex-none" />
+                )}
                 <div className="flex-1">
                   <p className={`title-md ${state ? "text-ink-faint" : ""}`}>{p.name}</p>
                   <p className="text-ink-faint numeric text-xs">{p.time}</p>
                 </div>
-                <button
-                  onClick={() => mark(p.id, "late")}
-                  className={`press rounded-full px-2.5 py-1 text-[0.7rem] ${
-                    state === "late" ? "bg-space-soft text-foreground" : "text-ink-faint"
-                  }`}
-                >
-                  Late
-                </button>
+                {!isHousehold && (
+                  <button
+                    onClick={() => mark(p.id, "late")}
+                    className={`press rounded-full px-2.5 py-1 text-[0.7rem] ${
+                      state === "late" ? "bg-space-soft text-foreground" : "text-ink-faint"
+                    }`}
+                  >
+                    Late
+                  </button>
+                )}
               </li>
             );
           })}
         </ul>
       </Section>
 
-      <Section
-        eyebrow="Last seven days"
-        title="Consistency"
-        aside={
-          analytics.totalLogged > 0 ? (
-            <span className="text-ink-faint numeric text-xs">
-              {analytics.totalLogged}/35 logged · {Math.round(analytics.onTimePercentage)}% on time
-            </span>
-          ) : undefined
-        }
-      >
-        <div className="grid grid-cols-7 gap-2">
-          {week.map((d) => {
-            const day = log[d] ?? {};
-            return (
-              <div key={d} className="text-center">
-                <div className="flex flex-col gap-1">
-                  {prayers.map((p) => {
-                    const s = day[p.id];
-                    return (
-                      <span
-                        key={p.id}
-                        title={`${p.name} — ${s ?? "missed"}`}
-                        className="h-2.5 rounded-[3px]"
-                        style={{
-                          background:
-                            s === "ontime"
-                              ? "var(--space-accent)"
-                              : s === "late"
-                                ? "var(--space-accent-soft)"
-                                : "var(--muted)",
-                        }}
-                      />
-                    );
-                  })}
+      {!isHousehold && (
+        <Section
+          eyebrow="Last seven days"
+          title="Consistency"
+          aside={
+            analytics.totalLogged > 0 ? (
+              <span className="text-ink-faint numeric text-xs">
+                {analytics.totalLogged}/35 logged · {Math.round(analytics.onTimePercentage)}% on time
+              </span>
+            ) : undefined
+          }
+        >
+          <div className="grid grid-cols-7 gap-2">
+            {week.map((d) => {
+              const day = log[d] ?? {};
+              return (
+                <div key={d} className="text-center">
+                  <div className="flex flex-col gap-1">
+                    {prayers.map((p) => {
+                      const st = day[p.id];
+                      return (
+                        <div
+                          key={p.id}
+                          className="h-2 rounded-sm transition-colors"
+                          style={{
+                            background:
+                              st === "ontime"
+                                ? "var(--space-accent)"
+                                : st === "late"
+                                  ? "var(--space-accent-soft)"
+                                  : "var(--rule)",
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <span className="text-ink-faint numeric mt-1 block text-[0.65rem]">{d.slice(8)}</span>
                 </div>
-                <p className="text-ink-faint mt-2 text-[0.62rem]">{d.slice(8)}</p>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
+              );
+            })}
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -444,13 +507,12 @@ export function Tasbih() {
 }
 
 export function Quran() {
+  const [selectedMemberId] = useSelectedMember();
   const [openSurah, setOpenSurah] = useState<number | null>(null);
   const [search, setSearch] = useState("");
-  const [bookmarks, setBookmarks] = useStore<string[]>("quran-bookmarks", []);
+  const [bookmarks, setBookmarks] = useMemberQuranBookmarks(selectedMemberId);
   const [translation, setTranslation] = useStore("quran-translation", true);
-  const [sessions, setSessions] = useStore<
-    { id: string; surah: string; range: string; mins: string; date: string }[]
-  >("quran-log", []);
+  const [sessions, setSessions] = useMemberQuranSessions(selectedMemberId);
   const [form, setForm] = useState({ surah: "", range: "", mins: "" });
 
   const { surah, loading, error, retry } = useSurah(openSurah);
@@ -801,13 +863,29 @@ export function Duas() {
 }
 
 export function Hifz() {
-  const [items, setItems] = useStore<HifzItem[]>("hifz", []);
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [items, setItems] = useMemberHifz(selectedMemberId);
   const [surah, setSurah] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ surah: string; nextDue?: string } | null>(null);
 
   const today = todayKey();
   const queue = useMemo(() => generateHifzRevisionQueue(items, today), [items, today]);
+
+  if (isHousehold) {
+    return (
+      <div className="space-y-10">
+        <Section eyebrow="Spaced revision" title="Hifz">
+          <EmptyState
+            glyph="❊"
+            headline="Personal Hifz Revision"
+            body="Hifz portions and retention schedules are kept per family member. Select a member above to practice and track individual memorization."
+          />
+        </Section>
+      </div>
+    );
+  }
 
   const focus = queue.dueToday[0] ?? null;
   const focusRetention = focus ? getRetentionScore(focus, today) : null;
@@ -1067,14 +1145,26 @@ export function Hifz() {
 
 
 export function Fasting() {
-  const [fasts, setFasts] = useStore<Record<string, "obligatory" | "voluntary">>("fasting", {});
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const [fasts, setFasts] = useMemberFasting(selectedMemberId);
   const days = [...Array(28)].map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (27 - i));
     return d.toISOString().slice(0, 10);
   });
   return (
-    <Section eyebrow="Last four weeks" title="Fasting">
+    <Section
+      eyebrow={isHousehold ? "Calendar" : activeMember ? `${activeMember.name}'s fasts` : "Last four weeks"}
+      title="Fasting"
+      aside={
+        isHousehold ? (
+          <span className="text-ink-faint text-xs">
+            Select a member above to record individual fasts
+          </span>
+        ) : undefined
+      }
+    >
       <div className="grid grid-cols-7 gap-1.5">
         {days.map((d) => {
           const s = fasts[d];
@@ -1082,6 +1172,7 @@ export function Fasting() {
             <button
               key={d}
               onClick={() => {
+                if (isHousehold) return;
                 const next = { ...fasts };
                 if (s === "voluntary") next[d] = "obligatory";
                 else if (s === "obligatory") delete next[d];
@@ -1099,6 +1190,7 @@ export function Fasting() {
                       : "transparent",
                 color: s === "obligatory" ? "var(--background)" : "var(--ink-faint)",
                 borderColor: s ? "transparent" : "var(--rule)",
+                cursor: isHousehold ? "default" : "pointer",
               }}
             >
               {d.slice(8)}

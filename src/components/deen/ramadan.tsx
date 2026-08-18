@@ -10,6 +10,7 @@ import {
   useRamadanMode,
   useTaraweeh,
 } from "@/lib/ramadan";
+import { useSelectedMember, useMemberFasting } from "@/lib/family-model";
 
 export function RamadanModeView() {
   const { isActive, isNaturalRamadan, ramadanDay, override, setOverride } = useRamadanMode();
@@ -25,7 +26,8 @@ export function RamadanModeView() {
     [fajrTime, maghribTime, now]
   );
 
-  const [fasts, setFasts] = useStore<Record<string, "obligatory" | "voluntary">>("fasting", {});
+  const [selectedMemberId] = useSelectedMember();
+  const [fasts, setFasts] = useMemberFasting(selectedMemberId);
   const isFastingToday = Boolean(fasts[today]);
 
   const { taraweehLog, logTaraweeh } = useTaraweeh();

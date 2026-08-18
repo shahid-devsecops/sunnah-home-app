@@ -14,6 +14,13 @@ import {
   InsightSection,
   NotEnoughYet,
 } from "@/components/insights/cards";
+import { MemberSelector } from "@/components/home/member-selector";
+import {
+  useSelectedMember,
+  useMemberSalah,
+  useMemberQuranSessions,
+  useMemberFasting,
+} from "@/lib/family-model";
 
 export const Route = createFileRoute("/review")({
   head: () => ({
@@ -41,12 +48,14 @@ const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 
 function InsightsPage() {
   const { experience } = useExperience();
-  const data = useInsights();
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+  const data = useInsights(selectedMemberId);
   const { week, salah, budget, mood, meals, dueReminders, family, headline } = data;
 
-  const [salahLog] = useStore<Record<string, Record<string, string>>>("salah", {});
-  const [sessions] = useStore<{ date: string }[]>("quran-log", []);
-  const [fasting] = useStore<Record<string, string>>("fasting", {});
+  const [salahLog] = useMemberSalah(selectedMemberId);
+  const [sessions] = useMemberQuranSessions(selectedMemberId);
+  const [fasting] = useMemberFasting(selectedMemberId);
 
   const salahStrip = useMemo(
     () =>
@@ -87,11 +96,14 @@ function InsightsPage() {
 
   return (
     <Shell space="home">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <MemberSelector />
+      </div>
       {experience === "vibrant" ? (
         <PageHero
           variant="review"
-          eyebrow={`${week[0]} → ${week[6]} · Weekly Insights`}
-          title="What your week is telling you"
+          eyebrow={isHousehold ? "Household Space · Operations" : activeMember ? `${activeMember.name}'s Weekly Reflection` : `${week[0]} → ${week[6]} · Weekly Insights`}
+          title={isHousehold ? "Family & Household Insights" : "What your week is telling you"}
           subtitle={openingLine}
           pills={[
             {

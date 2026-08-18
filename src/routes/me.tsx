@@ -3,6 +3,7 @@ import { Shell } from "@/components/veedu/shell";
 import { SubTabs } from "@/components/veedu/primitives";
 import { Cycle, Habits, Health, Journal, SelfCare } from "@/components/me/modules";
 import { Trends } from "@/components/me/trends";
+import { MemberSelector } from "@/components/home/member-selector";
 import { useTab } from "@/lib/use-tab";
 import { useStore } from "@/lib/store";
 
@@ -43,6 +44,9 @@ function MePage() {
   const availableTabs = TABS.filter((t) => t.id !== "cycle" || profile.gender === "female");
   return (
     <Shell space="me">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <MemberSelector />
+      </div>
       <div className="mb-8">
         <SubTabs tabs={availableTabs} value={tab} onChange={setTab} />
       </div>

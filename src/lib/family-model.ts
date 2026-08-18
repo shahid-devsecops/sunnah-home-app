@@ -305,9 +305,12 @@ export const MEMBER_PERSONAL_DOMAINS = [
   "salah",
   "fasting",
   "quran",
+  "quran-bookmarks",
+  "quran-sessions",
   "hifz",
   "habits",
   "water",
+  "checkins",
 ] as const;
 
 export type MemberPersonalDomain = (typeof MEMBER_PERSONAL_DOMAINS)[number];
@@ -585,6 +588,18 @@ export function useMemberCheckins(memberId?: string) {
   return useMemberStore<Record<string, string>>("checkins", memberId, {});
 }
 
+export function useMemberQuranBookmarks(memberId?: string) {
+  return useMemberStore<string[]>("quran-bookmarks", memberId, []);
+}
+
+export function useMemberQuranSessions(memberId?: string) {
+  return useMemberStore<{ id: string; surah: string; range: string; mins: string; date: string }[]>(
+    "quran-sessions",
+    memberId,
+    []
+  );
+}
+
 /**
  * Idempotently migrates legacy unpartitioned global personal data
  * into the primary member's scoped store partition.
@@ -644,6 +659,27 @@ export function migrateMemberStores(primaryMemberId: string): void {
         /* ignore parse error */
       }
     }
+  }
+
+  // 6. Checkins
+  const checkinsKey = `veedu:${getMemberStoreKey(primaryMemberId, "checkins")}`;
+  if (!window.localStorage.getItem(checkinsKey)) {
+    const legacy = window.localStorage.getItem("veedu:checkins");
+    if (legacy) window.localStorage.setItem(checkinsKey, legacy);
+  }
+
+  // 7. Quran Bookmarks
+  const bookmarksKey = `veedu:${getMemberStoreKey(primaryMemberId, "quran-bookmarks")}`;
+  if (!window.localStorage.getItem(bookmarksKey)) {
+    const legacy = window.localStorage.getItem("veedu:quran-bookmarks");
+    if (legacy) window.localStorage.setItem(bookmarksKey, legacy);
+  }
+
+  // 8. Quran Sessions (from legacy quran-log)
+  const sessionsKey = `veedu:${getMemberStoreKey(primaryMemberId, "quran-sessions")}`;
+  if (!window.localStorage.getItem(sessionsKey)) {
+    const legacy = window.localStorage.getItem("veedu:quran-log");
+    if (legacy) window.localStorage.setItem(sessionsKey, legacy);
   }
 }
 

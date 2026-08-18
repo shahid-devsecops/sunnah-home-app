@@ -20,15 +20,26 @@ import {
   type DailyActivityData,
 } from "@/lib/mood-intelligence";
 import { type SalahData } from "@/lib/salah-intelligence";
+import {
+  useSelectedMember,
+  useMemberCheckins,
+  useMemberHabits,
+  useMemberWater,
+  useMemberSalah,
+} from "@/lib/family-model";
 
 type Metrics = Record<string, { water: number; weight: string; sleep: string }>;
 
 /** PROTOTYPE — the logging that already happens, finally given back as a picture. */
 export function Trends() {
+  const [selectedMemberId, , activeMember] = useSelectedMember();
+  const isHousehold = selectedMemberId === undefined;
+
   const [metrics] = useStore<Metrics>("health", {});
-  const [habits] = useStore<{ id: string; name: string; days: string[] }[]>("habits", []);
-  const [checkins] = useStore<Record<string, string>>("checkins", {});
-  const [salah] = useStore<SalahData>("salah", {});
+  const [habits] = useMemberHabits(selectedMemberId);
+  const [checkins] = useMemberCheckins(selectedMemberId);
+  const [salah] = useMemberSalah(selectedMemberId);
+  const [waterLog] = useMemberWater(selectedMemberId);
 
   const days14 = useMemo(() => [...Array(14)].map((_, i) => isoOffset(new Date(), -(13 - i))), []);
 
@@ -36,26 +47,28 @@ export function Trends() {
     () =>
       days14.map((day) => {
         const m = metrics[day];
+        const w = waterLog[day]?.water ?? 0;
         return {
           day: day.slice(8),
-          water: m?.water ?? 0,
+          water: w,
           sleep: Number(m?.sleep ?? 0),
           weight: Number(m?.weight ?? 0) || null,
           habits: habits.filter((h) => h.days.includes(day)).length,
         };
       }),
-    [days14, metrics, habits],
+    [days14, metrics, waterLog, habits],
   );
 
   const moodActivityData: DailyActivityData[] = useMemo(() => {
     return days14.map((date) => {
-      const daySalah = salah[date] || {};
+      const daySalah = (salah as Record<string, Record<string, string>>)[date] || {};
       const sLogged = Object.keys(daySalah).length;
       const sOnTime = Object.values(daySalah).filter((s) => s === "ontime").length;
       const m = metrics[date];
+      const w = waterLog[date]?.water ?? 0;
       const entry: DailyActivityData = {
         date,
-        waterGlasses: m?.water ?? 0,
+        waterGlasses: w,
         habitsCompleted: habits.filter((h) => h.days.includes(date)).length,
       };
       if (checkins[date]) entry.mood = checkins[date];
@@ -63,7 +76,21 @@ export function Trends() {
       if (sLogged > 0) entry.salahOnTimePct = (sOnTime / sLogged) * 100;
       return entry;
     });
-  }, [days14, salah, metrics, checkins, habits]);
+  }, [days14, salah, metrics, waterLog, habits, checkins]);
+
+  if (isHousehold) {
+    return (
+      <div className="space-y-10">
+        <Section eyebrow="Two-week picture" title="Trends & Wellbeing">
+          <EmptyState
+            glyph="📈"
+            headline="Personal Trends"
+            body="Trends and wellbeing correlations are calculated for each individual family member. Select a member above to view their personal habits, sleep, and prayer consistency."
+          />
+        </Section>
+      </div>
+    );
+  }
 
   const moodAnalytics = useMemo(() => calculateMoodAnalytics(moodActivityData), [moodActivityData]);
   const moodInsights = useMemo(() => generateMoodInsights(moodAnalytics), [moodAnalytics]);

@@ -13,6 +13,7 @@ import {
   Tasbih,
 } from "@/components/deen/modules";
 import { RamadanModeView } from "@/components/deen/ramadan";
+import { MemberSelector } from "@/components/home/member-selector";
 import { useRamadanMode } from "@/lib/ramadan";
 import { useTab } from "@/lib/use-tab";
 
@@ -62,6 +63,9 @@ function DeenPage() {
 
   return (
     <Shell space="deen">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <MemberSelector />
+      </div>
       <div className="mb-8">
         <SubTabs tabs={tabs} value={activeTab} onChange={setTab} />
       </div>

@@ -894,7 +894,7 @@ describe("Wave 2.5 Fix B — Default Authenticated Member Perspective (ME / Hous
   });
 
   test("6. Personal Salah isolation across Shahid, Household, and Usman perspectives", () => {
-    mockStorage.clear();
+    window.localStorage.clear();
 
     const shahidSalah = { "2026-08-18": { fajr: "ontime", dhuhr: "ontime", asr: "ontime", maghrib: "ontime", isha: "ontime" } };
     const usmanSalah = { "2026-08-18": { asr: "ontime" } };
@@ -1048,7 +1048,109 @@ describe("Wave 2.5 Fix B — Default Authenticated Member Perspective (ME / Hous
     assert.ok(usmanTasks.some((t) => t.id === "t_2"));
     assert.equal(usmanTasks.some((t) => t.id === "t_1"), false);
   });
+
+  test("11. H2.5-B: Complete Member-Scoped Personal Data Isolation across all domains", () => {
+    window.localStorage.clear();
+
+    // 1. Hifz portions isolation
+    const shahidHifz = [{ id: "h1", surah: "Al-Baqarah", range: "1-20" }];
+    const usmanHifz = [{ id: "h2", surah: "An-Naba", range: "1-40" }];
+    writeMemberStore("hifz", "mem_shahid", shahidHifz);
+    writeMemberStore("hifz", "mem_usman", usmanHifz);
+
+    assert.deepEqual(readMemberStore("hifz", "mem_shahid", []), shahidHifz);
+    assert.deepEqual(readMemberStore("hifz", "mem_usman", []), usmanHifz);
+    assert.deepEqual(readMemberStore("hifz", undefined, []), []);
+
+    // 2. Quran bookmarks & sessions isolation
+    const shahidBookmarks = ["2", "36", "67"];
+    const usmanBookmarks = ["1", "112", "114"];
+    writeMemberStore("quran-bookmarks", "mem_shahid", shahidBookmarks);
+    writeMemberStore("quran-bookmarks", "mem_usman", usmanBookmarks);
+
+    assert.deepEqual(readMemberStore("quran-bookmarks", "mem_shahid", []), shahidBookmarks);
+    assert.deepEqual(readMemberStore("quran-bookmarks", "mem_usman", []), usmanBookmarks);
+    assert.deepEqual(readMemberStore("quran-bookmarks", undefined, []), []);
+
+    // 3. Habits isolation
+    const shahidHabits = [{ id: "hab1", name: "Read Tahajjud", days: ["2026-08-18"] }];
+    const usmanHabits = [{ id: "hab2", name: "Math practice", days: ["2026-08-18"] }];
+    writeMemberStore("habits", "mem_shahid", shahidHabits);
+    writeMemberStore("habits", "mem_usman", usmanHabits);
+
+    assert.deepEqual(readMemberStore("habits", "mem_shahid", []), shahidHabits);
+    assert.deepEqual(readMemberStore("habits", "mem_usman", []), usmanHabits);
+    assert.deepEqual(readMemberStore("habits", undefined, []), []);
+
+    // 4. Water isolation
+    const shahidWater = { "2026-08-18": { water: 8 } };
+    const usmanWater = { "2026-08-18": { water: 4 } };
+    writeMemberStore("water", "mem_shahid", shahidWater);
+    writeMemberStore("water", "mem_usman", usmanWater);
+
+    assert.deepEqual(readMemberStore("water", "mem_shahid", {}), shahidWater);
+    assert.deepEqual(readMemberStore("water", "mem_usman", {}), usmanWater);
+    assert.deepEqual(readMemberStore("water", undefined, {}), {});
+
+    // 5. Checkins / Mood isolation
+    const shahidCheckin = { "2026-08-18": "bright" };
+    const usmanCheckin = { "2026-08-18": "tired" };
+    writeMemberStore("checkins", "mem_shahid", shahidCheckin);
+    writeMemberStore("checkins", "mem_usman", usmanCheckin);
+
+    assert.deepEqual(readMemberStore("checkins", "mem_shahid", {}), shahidCheckin);
+    assert.deepEqual(readMemberStore("checkins", "mem_usman", {}), usmanCheckin);
+    assert.deepEqual(readMemberStore("checkins", undefined, {}), {});
+
+    // 6. Fasting isolation
+    const shahidFasting = { "2026-08-18": "voluntary" };
+    const usmanFasting = {};
+    writeMemberStore("fasting", "mem_shahid", shahidFasting);
+    writeMemberStore("fasting", "mem_usman", usmanFasting);
+
+    assert.deepEqual(readMemberStore("fasting", "mem_shahid", {}), shahidFasting);
+    assert.deepEqual(readMemberStore("fasting", "mem_usman", {}), {});
+    assert.deepEqual(readMemberStore("fasting", undefined, {}), {});
+  });
+
+  test("12. H2.5-B: Comprehensive Legacy Migration for all 8 domains", () => {
+    window.localStorage.clear();
+
+    // Populate legacy unpartitioned storage
+    window.localStorage.setItem("veedu:salah", JSON.stringify({ "2026-08-18": { fajr: "ontime" } }));
+    window.localStorage.setItem("veedu:fasting", JSON.stringify({ "2026-08-18": "obligatory" }));
+    window.localStorage.setItem("veedu:hifz", JSON.stringify([{ id: "h_leg", surah: "Yasin" }]));
+    window.localStorage.setItem("veedu:habits", JSON.stringify([{ id: "hab_leg", name: "Walk", days: [] }]));
+    window.localStorage.setItem("veedu:health", JSON.stringify({ "2026-08-18": { water: 6, weight: "72", sleep: "7" } }));
+    window.localStorage.setItem("veedu:checkins", JSON.stringify({ "2026-08-18": "grateful" }));
+    window.localStorage.setItem("veedu:quran-bookmarks", JSON.stringify(["18", "36"]));
+    window.localStorage.setItem("veedu:quran-log", JSON.stringify([{ id: "s1", surah: "Al-Mulk", date: "2026-08-18" }]));
+
+    // Run migration for primary admin (Shahid)
+    migrateMemberStores("mem_shahid");
+
+    // Verify all 8 domains migrated to mem_shahid partition
+    assert.deepEqual(readMemberStore("salah", "mem_shahid", {}), { "2026-08-18": { fajr: "ontime" } });
+    assert.deepEqual(readMemberStore("fasting", "mem_shahid", {}), { "2026-08-18": "obligatory" });
+    assert.deepEqual(readMemberStore("hifz", "mem_shahid", []), [{ id: "h_leg", surah: "Yasin" }]);
+    assert.deepEqual(readMemberStore("habits", "mem_shahid", []), [{ id: "hab_leg", name: "Walk", days: [] }]);
+    assert.deepEqual(readMemberStore("water", "mem_shahid", {}), { "2026-08-18": { water: 6 } });
+    assert.deepEqual(readMemberStore("checkins", "mem_shahid", {}), { "2026-08-18": "grateful" });
+    assert.deepEqual(readMemberStore("quran-bookmarks", "mem_shahid", []), ["18", "36"]);
+    assert.deepEqual(readMemberStore("quran-sessions", "mem_shahid", []), [{ id: "s1", surah: "Al-Mulk", date: "2026-08-18" }]);
+
+    // Verify Usman store remains clean
+    assert.deepEqual(readMemberStore("salah", "mem_usman", {}), {});
+    assert.deepEqual(readMemberStore("hifz", "mem_usman", []), []);
+    assert.deepEqual(readMemberStore("habits", "mem_usman", []), []);
+
+    // Verify Idempotency — running again doesn't corrupt or overwrite modified member data
+    writeMemberStore("habits", "mem_shahid", [{ id: "hab_new", name: "Run", days: [] }]);
+    migrateMemberStores("mem_shahid");
+    assert.deepEqual(readMemberStore("habits", "mem_shahid", []), [{ id: "hab_new", name: "Run", days: [] }]);
+  });
 });
+
 
 
 

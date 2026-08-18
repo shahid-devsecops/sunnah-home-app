@@ -22,6 +22,13 @@ import {
 import { rankRecipes, type RecipeScore } from "@/lib/meal-intelligence";
 import { weekKey } from "@/components/home/modules";
 import { occursOn, type Recurrence } from "@/lib/recurrence";
+import {
+  useSelectedMember,
+  useMemberSalah,
+  useMemberCheckins,
+  useMemberHabits,
+  useMemberWater,
+} from "@/lib/family-model";
 
 /**
  * Presentation-only aggregator. It reads the existing stores and calls the
@@ -99,7 +106,11 @@ export function prioritiseInsights(groups: Insight[][], limit = 5): Insight[] {
   return picked.slice(0, limit);
 }
 
-export function useInsights(): InsightsData {
+export function useInsights(memberId?: string): InsightsData {
+  const [selectedMemberId] = useSelectedMember();
+  const effectiveId = memberId !== undefined ? memberId : selectedMemberId;
+  const isHousehold = effectiveId === undefined;
+
   const week = useMemo(() => getWeekRange(new Date()), []);
   const previousWeek = useMemo(
     () => [...Array(7)].map((_, i) => isoOffset(new Date(), -(13 - i))),
@@ -111,12 +122,13 @@ export function useInsights(): InsightsData {
   );
   const monthPrefix = todayKey().slice(0, 7);
 
-  const [salahLog] = useStore<SalahData>("salah", {});
+  const [salahLog] = useMemberSalah(effectiveId);
   const [expenses] = useStore<ExpenseRecord[]>("expenses", []);
   const [limits] = useStore<Record<string, number>>("limits", {});
-  const [checkins] = useStore<Record<string, string>>("checkins", {});
-  const [health] = useStore<Record<string, { water: number; sleep: string }>>("health", {});
-  const [habits] = useStore<{ id: string; name: string; days: string[] }[]>("habits", []);
+  const [checkins] = useMemberCheckins(effectiveId);
+  const [health] = useStore<Record<string, { weight?: string; sleep: string }>>("health", {});
+  const [habits] = useMemberHabits(effectiveId);
+  const [waterLog] = useMemberWater(effectiveId);
   const [recipes] = useStore<{ id: string; name: string; items: string }[]>("recipes", []);
   const [mealsHistory] = useStore<Record<string, Record<string, string>>>("mealsHistory", {});
   const [reminders] = useStore<{ id: string; title: string; time: string; recur: Recurrence }[]>(
@@ -126,10 +138,13 @@ export function useInsights(): InsightsData {
   const [family] = useStore<{ id: string; name: string; role: string }[]>("family", []);
 
   const comparison = useMemo(
-    () => compareSalahPeriods(salahLog, week, previousWeek),
-    [salahLog, week, previousWeek],
+    () => (isHousehold ? compareSalahPeriods({}, week, previousWeek) : compareSalahPeriods(salahLog as SalahData, week, previousWeek)),
+    [isHousehold, salahLog, week, previousWeek],
   );
-  const salahInsights = useMemo(() => generateSalahInsights(comparison), [comparison]);
+  const salahInsights = useMemo(
+    () => (isHousehold ? [] : generateSalahInsights(comparison)),
+    [isHousehold, comparison],
+  );
 
   const budgetAnalytics = useMemo(
     () => calculateBudgetAnalytics(expenses, monthPrefix),
@@ -142,32 +157,39 @@ export function useInsights(): InsightsData {
 
   const activity: DailyActivityData[] = useMemo(
     () =>
-      monthDays.map((date) => {
-        const day = salahLog[date] ?? {};
-        const logged = Object.keys(day).length;
-        const onTime = Object.values(day).filter((s) => s === "ontime").length;
-        const h = health[date];
-        const entry: DailyActivityData = {
-          date,
-          waterGlasses: h?.water ?? 0,
-          habitsCompleted: habits.filter((x) => x.days.includes(date)).length,
-        };
-        if (checkins[date]) entry.mood = checkins[date];
-        if (h?.sleep && Number(h.sleep) > 0) entry.sleepHours = Number(h.sleep);
-        if (logged > 0) entry.salahOnTimePct = (onTime / logged) * 100;
-        return entry;
-      }),
-    [monthDays, salahLog, health, habits, checkins],
+      isHousehold
+        ? []
+        : monthDays.map((date) => {
+            const day = (salahLog as Record<string, Record<string, string>>)[date] ?? {};
+            const logged = Object.keys(day).length;
+            const onTime = Object.values(day).filter((s) => s === "ontime").length;
+            const h = health[date];
+            const w = waterLog[date]?.water ?? 0;
+            const entry: DailyActivityData = {
+              date,
+              waterGlasses: w,
+              habitsCompleted: habits.filter((x: { days: string[] }) => x.days.includes(date)).length,
+            };
+            if (checkins[date]) entry.mood = checkins[date];
+            if (h?.sleep && Number(h.sleep) > 0) entry.sleepHours = Number(h.sleep);
+            if (logged > 0) entry.salahOnTimePct = (onTime / logged) * 100;
+            return entry;
+          }),
+    [isHousehold, monthDays, salahLog, health, waterLog, habits, checkins],
   );
 
-  const moodAnalytics = useMemo(() => calculateMoodAnalytics(activity), [activity]);
+  const moodAnalytics = useMemo(
+    () => (isHousehold ? calculateMoodAnalytics([]) : calculateMoodAnalytics(activity)),
+    [isHousehold, activity],
+  );
   const moodInsights = useMemo(() => {
+    if (isHousehold) return [];
     const generated = generateMoodInsights(moodAnalytics);
     // Several correlations can share a title; show each distinct message once.
     const byTitle = new Map<string, Insight>();
     for (const i of generated) if (!byTitle.has(i.explanation)) byTitle.set(i.explanation, i);
     return [...byTitle.values()];
-  }, [moodAnalytics]);
+  }, [isHousehold, moodAnalytics]);
 
   const suggestions = useMemo(
     () => rankRecipes(recipes, mealsHistory, weekKey(0)).slice(0, 3),
@@ -185,8 +207,8 @@ export function useInsights(): InsightsData {
   );
 
   const headline = useMemo(
-    () => prioritiseInsights([salahInsights, budgetInsights, moodInsights]),
-    [salahInsights, budgetInsights, moodInsights],
+    () => (isHousehold ? budgetInsights.slice(0, 3) : prioritiseInsights([salahInsights, budgetInsights, moodInsights])),
+    [isHousehold, salahInsights, budgetInsights, moodInsights],
   );
 
   return {

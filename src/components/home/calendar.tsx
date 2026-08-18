@@ -17,6 +17,12 @@ import { hijriLabel, islamicMarker, hijriParts } from "@/lib/hijri";
 import { type Recurrence, occursOn } from "@/lib/recurrence";
 import { todayKey, uid, useStore } from "@/lib/store";
 import { useExperience } from "@/lib/theme-provider";
+import {
+  useSelectedMember,
+  useMemberFasting,
+  filterTasksForMember,
+  filterEventsForMember,
+} from "@/lib/family-model";
 
 export type CalEvent = {
   id: string;
@@ -31,41 +37,39 @@ export type CalEvent = {
 type Task = {
   id: string;
   title: string;
-  list: string;
+  list?: string;
   time?: string;
   done: boolean;
-  date: string;
+  date?: string;
   recur?: Recurrence;
   completions?: string[];
-  assigneeId?: string;
   assignedTo?: string;
+  assigneeId?: string;
 };
 
 const WEEK = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const isoOf = (d: Date) => {
-  const c = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return c.toISOString().slice(0, 10);
-};
-
-export function eventsOn(events: CalEvent[], iso: string) {
-  return events
-    .filter((e) => e.date === iso || occursOn(e.recur, iso))
-    .sort((a, b) => (a.time ?? "99").localeCompare(b.time ?? "99"));
+export function isoOf(d: Date) {
+  return d.toISOString().slice(0, 10);
 }
 
-export function tasksOn(tasks: Task[], iso: string) {
-  return tasks.filter((t) => (t.date === iso && !t.recur) || occursOn(t.recur, iso));
+export function eventsOn(events: CalEvent[], day: string) {
+  return events.filter((e) => occursOn(e.recur ?? { freq: "none", start: e.date }, day));
+}
+
+export function tasksOn(tasks: Task[], day: string) {
+  return tasks.filter((t) => occursOn(t.recur ?? { freq: "none", start: t.date ?? "" }, day));
 }
 
 /** PROTOTYPE — one visual calendar carrying events, tasks, meals, fasting and Hijri dates. */
 export function UnifiedCalendar() {
   const { experience } = useExperience();
+  const [selectedMemberId] = useSelectedMember();
   const [events, setEvents] = useStore<CalEvent[]>("events", []);
   const [tasks] = useStore<Task[]>("tasks", []);
   const [meals] = useStore<Record<string, string>>("meals", {});
-  const [fasting] = useStore<Record<string, string>>("fasting", {});
+  const [fasting] = useMemberFasting(selectedMemberId);
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -85,6 +89,15 @@ export function UnifiedCalendar() {
     recur: { freq: "none", start: todayKey() },
   });
 
+  const visibleTasks = useMemo(
+    () => filterTasksForMember(tasks, selectedMemberId),
+    [tasks, selectedMemberId]
+  );
+  const visibleEvents = useMemo(
+    () => filterEventsForMember(events, selectedMemberId),
+    [events, selectedMemberId]
+  );
+
   const grid = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
     const offset = (first.getDay() + 6) % 7;
@@ -97,8 +110,8 @@ export function UnifiedCalendar() {
   }, [cursor]);
 
   const selDate = new Date(`${selected}T00:00:00`);
-  const selEvents = eventsOn(events, selected);
-  const selTasks = tasksOn(tasks, selected);
+  const selEvents = eventsOn(visibleEvents, selected);
+  const selTasks = tasksOn(visibleTasks, selected);
   const selMeal = meals[`${DAY_KEYS[selDate.getDay()]}-Dinner`];
   const marker = islamicMarker(selDate);
 
