@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { useStore } from "./store";
+import { useStore, writeStore } from "./store";
 
 export type FamilyRole = "admin" | "member" | "child" | "parent" | "other";
 export type CanonicalFamilyRole = "admin" | "member" | "child";
@@ -24,6 +24,16 @@ export interface FamilyMember {
 
 /** Storage key for active perspective/view filter */
 export const SELECTED_MEMBER_KEY = "selected_member_id";
+
+/**
+ * Programmatically resets the active perspective back to Household (undefined).
+ */
+export function resetSelectedMember(): void {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(`veedu:${SELECTED_MEMBER_KEY}`);
+  }
+  writeStore<string | undefined>(SELECTED_MEMBER_KEY, undefined);
+}
 
 /**
  * Normalizes legacy and product roles to the canonical set: "admin" | "member" | "child".
@@ -51,6 +61,7 @@ export function isChildMember(memberId?: string | null, family?: FamilyMember[] 
  * Returns [effectiveMemberId, setSelectedMemberId, activeFamilyMember].
  * Persists in local storage under `veedu:selected_member_id`.
  * Safely defaults to `undefined` (Household) if no member or an invalid ID is selected.
+ * NEVER automatically selects first member or a child.
  */
 export function useSelectedMember(): [
   string | undefined,
@@ -61,7 +72,7 @@ export function useSelectedMember(): [
   const [family] = useStore<FamilyMember[]>("family", []);
 
   const activeMember = useMemo(
-    () => (selectedId ? family.find((m) => m.id === selectedId) : undefined),
+    () => (selectedId ? family.find((m) => m && m.id === selectedId) : undefined),
     [selectedId, family]
   );
 
@@ -70,7 +81,7 @@ export function useSelectedMember(): [
 
   const setMember = useCallback(
     (id: string | undefined) => {
-      setSelectedId(id);
+      setSelectedId(id || undefined);
     },
     [setSelectedId]
   );

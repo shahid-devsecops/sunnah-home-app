@@ -25,6 +25,8 @@ import {
   writeMemberStore,
   migrateMemberStores,
   MEMBER_PERSONAL_DOMAINS,
+  resetSelectedMember,
+  SELECTED_MEMBER_KEY,
 } from "./family-model";
 import { createRoutine } from "./routine-engine";
 import { buildDailyThread, type DailySurfaceData, type TaskRecord, type CalEventRecord } from "./daily-surface";
@@ -761,6 +763,54 @@ describe("Wave H2.5-A — Member Data Ownership & Local Partitioning", () => {
     current = readMemberStore<Record<string, Record<string, string>>>("salah", "mem_shahid", {});
     assert.equal(Object.keys(current["2026-08-18"] ?? {}).length, 2);
   });
+
+  test("10. Fresh user defaults to Household (undefined) and resetSelectedMember clears perspective", () => {
+    mockStorage.clear();
+
+    // 1. Fresh state: key does not exist
+    assert.equal(mockStorage.has("veedu:selected_member_id"), false);
+
+    // 2. Set an old child perspective
+    mockStorage.set("veedu:selected_member_id", JSON.stringify("mem_usman"));
+    assert.equal(mockStorage.get("veedu:selected_member_id"), JSON.stringify("mem_usman"));
+
+    // 3. Reset perspective to Household
+    resetSelectedMember();
+    assert.equal(mockStorage.has("veedu:selected_member_id"), false);
+
+    // 4. Household is strictly undefined
+    assert.equal(readMemberStore("salah", undefined, undefined), undefined);
+  });
+
+  test("11. Household aggregate verification — shows tasks, routines, and events, suppresses personal domains", () => {
+    const tasks: TaskRecord[] = [
+      { id: "t_unassigned", title: "Buy groceries", done: false, date: "2026-08-18" },
+      { id: "t_shahid", title: "Pay utility bill", done: false, date: "2026-08-18", assignedTo: "mem_shahid" },
+      { id: "t_usman", title: "Fold clothes", done: false, date: "2026-08-18", assignedTo: "mem_usman" },
+    ];
+    const events: CalEventRecord[] = [
+      { id: "ev_1", title: "Family Dinner", date: "2026-08-18", time: "19:00" },
+    ];
+
+    // Household perspective (memberId: undefined)
+    const householdTasks = filterTasksForMember(tasks, undefined);
+    assert.equal(householdTasks.length, 3, "Household view includes all household tasks");
+
+    const householdEvents = filterEventsForMember(events, undefined);
+    assert.equal(householdEvents.length, 1, "Household view includes household events");
+
+    // Member perspective (Usman)
+    const usmanTasks = filterTasksForMember(tasks, "mem_usman");
+    assert.equal(usmanTasks.length, 2, "Usman sees assigned task + unassigned household task");
+    assert.equal(usmanTasks.some((t) => t.id === "t_shahid"), false, "Usman does NOT see Shahid's personal task");
+
+    // Personal domains in Household perspective are empty
+    assert.deepEqual(readMemberStore("salah", undefined, {}), {});
+    assert.deepEqual(readMemberStore("hifz", undefined, []), []);
+    assert.deepEqual(readMemberStore("habits", undefined, []), []);
+    assert.deepEqual(readMemberStore("water", undefined, {}), {});
+  });
 });
+
 
 

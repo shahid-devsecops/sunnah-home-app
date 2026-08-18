@@ -14,7 +14,8 @@ export function readStore<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(PREFIX + key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    if (!raw || raw === "undefined") return fallback;
+    return JSON.parse(raw) as T;
   } catch {
     return fallback;
   }
@@ -23,7 +24,11 @@ export function readStore<T>(key: string, fallback: T): T {
 export function writeStore<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(PREFIX + key, JSON.stringify(value));
+    if (value === undefined) {
+      window.localStorage.removeItem(PREFIX + key);
+    } else {
+      window.localStorage.setItem(PREFIX + key, JSON.stringify(value));
+    }
   } catch {
     /* quota — keep working in memory */
   }

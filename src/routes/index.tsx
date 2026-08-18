@@ -270,7 +270,10 @@ function Today() {
   const taskPct = dueToday.length ? (doneCount / dueToday.length) * 100 : 0;
   const salahPct = (prayed / 5) * 100;
   const groceryPct = grocery.length ? ((grocery.length - leftToBuy) / grocery.length) * 100 : 0;
-  const dayPct = Math.round((taskPct + salahPct + groceryPct) / 3);
+  const isHouseholdView = selectedMemberId === undefined && family.length > 0;
+  const dayPct = isHouseholdView
+    ? Math.round((taskPct + groceryPct) / 2)
+    : Math.round((taskPct + salahPct + groceryPct) / 3);
   const spentToday = expenses
     .filter((e) => e.date === today)
     .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
@@ -310,6 +313,7 @@ function Today() {
         dayPct={dayPct}
         salahPct={salahPct}
         selectedMember={selectedMember}
+        isHousehold={isHouseholdView}
       />
     );
   }
@@ -324,6 +328,7 @@ function Today() {
       doneCount={doneCount}
       todayEvents={todayEvents}
       prayed={prayed}
+      countdown={countdown}
       leftToBuy={leftToBuy}
       grocery={grocery}
       bands={bands}
@@ -346,6 +351,7 @@ function CalmToday({
   doneCount,
   todayEvents,
   prayed,
+  countdown,
   leftToBuy,
   grocery,
   bands,
@@ -360,6 +366,7 @@ function CalmToday({
   doneCount: number;
   todayEvents: CalEvent[];
   prayed: number;
+  countdown: { next: { id: string; name: string; time: string }; hours: number; mins: number } | null;
   leftToBuy: number;
   grocery: { id: string; got: boolean }[];
   bands: Band[];
@@ -429,7 +436,15 @@ function CalmToday({
             value={`${doneCount}/${dueToday.length}`}
             pct={dueToday.length ? (doneCount / dueToday.length) * 100 : 0}
           />
-          <ProgressLine label="Salah" value={`${prayed}/5`} pct={(prayed / 5) * 100} />
+          {selectedMember ? (
+            <ProgressLine label="Salah" value={`${prayed}/5`} pct={(prayed / 5) * 100} />
+          ) : (
+            <ProgressLine
+              label="Next Prayer"
+              value={countdown ? `${countdown.next.name} · ${countdown.next.time}` : "5 daily"}
+              pct={100}
+            />
+          )}
           <ProgressLine
             label="Grocery"
             value={`${grocery.length - leftToBuy}/${grocery.length}`}
@@ -530,6 +545,7 @@ function VibrantToday({
   dayPct,
   salahPct,
   selectedMember,
+  isHousehold,
 }: {
   now: Date | null;
   hour: number;
@@ -557,6 +573,7 @@ function VibrantToday({
   dayPct: number;
   salahPct: number;
   selectedMember?: FamilyMember | undefined;
+  isHousehold?: boolean;
 }) {
   const hello = vibrantGreeting(hour);
 
@@ -646,6 +663,8 @@ function VibrantToday({
           logged={loggedSalah}
           nextId={countdown?.next.id}
           prayed={prayed}
+          isHousehold={isHousehold}
+          nextPrayer={countdown}
         />
       )}
 
@@ -663,25 +682,44 @@ function VibrantToday({
 
       {/* ── Bento: the day at a glance, one hue per life-area ───────────── */}
       <section aria-label="Today at a glance" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Tile tone="prayer" to="/deen" index={0} className="col-span-2 flex items-center gap-4.5 p-4 sm:p-5">
-          <ProgressRing pct={salahPct} tone="prayer" label="Salah" size={72} thickness={7}>
-            <span className="numeric text-[0.95rem] font-bold" style={{ color: "var(--tone)" }}>
-              {prayed}
-              <span className="text-ink-faint text-[0.7rem]">/5</span>
+        {selectedMember ? (
+          <Tile tone="prayer" to="/deen" index={0} className="col-span-2 flex items-center gap-4.5 p-4 sm:p-5">
+            <ProgressRing pct={salahPct} tone="prayer" label="Salah" size={72} thickness={7}>
+              <span className="numeric text-[0.95rem] font-bold" style={{ color: "var(--tone)" }}>
+                {prayed}
+                <span className="text-ink-faint text-[0.7rem]">/5</span>
+              </span>
+            </ProgressRing>
+            <span className="min-w-0 flex-1">
+              <span className="eyebrow block" style={{ color: "var(--tone)" }}>
+                Salah
+              </span>
+              <span className="title-md mt-1 block text-[1.05rem]">
+                {prayed === 5 ? "All five, alhamdulillah 🤍" : `${prayed} of 5 prayed`}
+              </span>
+              <span className="text-ink-soft mt-0.5 block text-[0.8rem] font-medium">
+                {prayed === 5 ? "A complete thread today" : "Keep the thread going"}
+              </span>
             </span>
-          </ProgressRing>
-          <span className="min-w-0 flex-1">
-            <span className="eyebrow block" style={{ color: "var(--tone)" }}>
-              Salah
+          </Tile>
+        ) : (
+          <Tile tone="prayer" to="/deen" index={0} className="col-span-2 flex items-center gap-4.5 p-4 sm:p-5">
+            <div className="size-16 rounded-2xl bg-[color-mix(in_oklab,var(--tone)_15%,transparent)] grid place-items-center flex-none">
+              <Moon className="size-7 text-[var(--tone)]" />
+            </div>
+            <span className="min-w-0 flex-1">
+              <span className="eyebrow block" style={{ color: "var(--tone)" }}>
+                Prayer Times
+              </span>
+              <span className="title-md mt-1 block text-[1.05rem]">
+                {countdown ? `Next: ${countdown.next.name} · ${countdown.next.time}` : "5 Daily Prayers"}
+              </span>
+              <span className="text-ink-soft mt-0.5 block text-[0.8rem] font-medium">
+                {countdown ? `in ${countdown.hours ? `${countdown.hours}h ` : ""}${countdown.mins}m` : "Universal prayer schedule"}
+              </span>
             </span>
-            <span className="title-md mt-1 block text-[1.05rem]">
-              {prayed === 5 ? "All five, alhamdulillah 🤍" : `${prayed} of 5 prayed`}
-            </span>
-            <span className="text-ink-soft mt-0.5 block text-[0.8rem] font-medium">
-              {prayed === 5 ? "A complete thread today" : "Keep the thread going"}
-            </span>
-          </span>
-        </Tile>
+          </Tile>
+        )}
 
         <StatTile
           tone="task"
@@ -850,11 +888,15 @@ function PrayerRhythm({
   logged,
   nextId,
   prayed,
+  isHousehold = false,
+  nextPrayer,
 }: {
   prayers: { id: string; name: string; time: string }[];
   logged: Record<string, unknown>;
   nextId?: string | undefined;
   prayed: number;
+  isHousehold?: boolean | undefined;
+  nextPrayer?: { next: { id: string; name: string; time: string }; hours: number; mins: number } | null;
 }) {
   return (
     <section
@@ -870,7 +912,13 @@ function PrayerRhythm({
               Today's Rhythm
             </p>
             <p className="title-md text-[0.98rem] mt-0.5">
-              {prayed === 5 ? "Every prayer kept 🤍" : `${prayed} of 5 kept so far`}
+              {isHousehold
+                ? nextPrayer
+                  ? `Next: ${nextPrayer.next.name} at ${nextPrayer.next.time}`
+                  : "5 daily prayer times"
+                : prayed === 5
+                  ? "Every prayer kept 🤍"
+                  : `${prayed} of 5 kept so far`}
             </p>
           </div>
         </div>
