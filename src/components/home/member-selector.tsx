@@ -2,6 +2,7 @@ import { Home, User, Users } from "lucide-react";
 import {
   type FamilyMember,
   getCanonicalFamilyRole,
+  getAuthenticatedFamilyMember,
   getPrimaryFamilyMember,
   useSelectedMember,
 } from "@/lib/family-model";
@@ -11,6 +12,7 @@ import { useExperience } from "@/lib/theme-provider";
 export function MemberSelector({ className = "" }: { className?: string }) {
   const { experience } = useExperience();
   const [family] = useStore<FamilyMember[]>("family", []);
+  const [account] = useStore<{ id?: string; email: string } | null>("account", null);
   const [profile] = useStore<{ name?: string }>("profile", {});
   const [selectedMemberId, setSelectedMemberId, activeMember] = useSelectedMember();
 
@@ -18,7 +20,8 @@ export function MemberSelector({ className = "" }: { className?: string }) {
     return null;
   }
 
-  const primaryMember = getPrimaryFamilyMember(family, profile?.name);
+  const authenticatedMember = getAuthenticatedFamilyMember(family, account?.id);
+  const primaryMember = authenticatedMember ?? getPrimaryFamilyMember(family, profile?.name);
   const otherMembers = family.filter((m) => m.id !== primaryMember?.id);
   const isVibrant = experience === "vibrant";
 

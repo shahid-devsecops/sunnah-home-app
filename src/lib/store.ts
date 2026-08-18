@@ -68,6 +68,10 @@ export async function syncFromCloud() {
 
   let changed = false;
   data.forEach((row) => {
+    // Protect active perspective from being blindly overridden by stale generic user_data sync
+    if (row.key === "selected_member_id") {
+      return;
+    }
     const current = window.localStorage.getItem(PREFIX + row.key);
     const incoming = JSON.stringify(row.value);
     if (current !== incoming) {
@@ -79,11 +83,23 @@ export async function syncFromCloud() {
 }
 
 if (typeof window !== "undefined") {
+  // Hydrate initial auth account state
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session?.user) {
+      writeStore("account", { id: session.user.id, email: session.user.email ?? "" });
+    }
+  });
+
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
-      if (session) {
+      if (session?.user) {
+        writeStore("account", { id: session.user.id, email: session.user.email ?? "" });
         syncFromCloud();
       }
+    } else if (event === "SIGNED_OUT") {
+      writeStore("account", null);
+      window.localStorage.removeItem(PREFIX + "selected_member_id");
+      emit("selected_member_id");
     }
   });
 }

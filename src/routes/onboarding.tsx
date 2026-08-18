@@ -15,6 +15,7 @@ function OnboardingPage() {
   const navigate = useNavigate();
   const [profile, setProfile] = useStore("profile", { name: "", city: "Kozhikode", gender: "" });
   const [family, setFamily] = useStore<FamilyMember[]>("family", []);
+  const [account] = useStore<{ id?: string; email: string } | null>("account", null);
   const [, setSelectedMemberId] = useSelectedMember();
   const [localProfile, setLocalProfile] = useState(profile);
 
@@ -34,10 +35,17 @@ function OnboardingPage() {
         id: uid(),
         name: trimmedName,
         role: "admin",
+        linkedUserId: account?.id ?? undefined,
         chores: [],
       };
       setFamily([primaryMember, ...family]);
       memberId = primaryMember.id;
+    } else if (account?.id && !existing.linkedUserId) {
+      setFamily(
+        family.map((m) =>
+          m.id === existing.id ? { ...m, linkedUserId: account.id } : m
+        )
+      );
     }
 
     if (memberId) {

@@ -19,6 +19,8 @@ import {
   getHouseholdRoutines,
   getMemberRoutines,
   getMemberStoreKey,
+  getAuthenticatedFamilyMember,
+  migrateAuthFamilyMemberLink,
   getPrimaryFamilyMember,
   getPrimaryMemberId,
   readMemberStore,
@@ -914,7 +916,140 @@ describe("Wave 2.5 Fix B — Default Authenticated Member Perspective (ME / Hous
     assert.deepEqual(readUsman, usmanSalah);
     assert.equal(Object.keys(readUsman["2026-08-18"]).length, 1);
   });
+
+  test("7. Canonical Auth → FamilyMember identity resolver (linkedUserId) and array invariance", () => {
+    const authFamily: FamilyMember[] = [
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+      { id: "mem_fatima", name: "Fatima", role: "member", chores: [] },
+      { id: "mem_shahid", name: "Shahid", role: "admin", linkedUserId: "usr_shahid_123", chores: [] },
+    ];
+
+    // 1. Exact linkedUserId match returns Shahid regardless of Usman being first in array
+    const resolved = getAuthenticatedFamilyMember(authFamily, "usr_shahid_123");
+    assert.ok(resolved);
+    assert.equal(resolved.id, "mem_shahid");
+    assert.equal(resolved.name, "Shahid");
+
+    // 2. Unlinked auth user -> returns undefined (Household fallback)
+    assert.equal(getAuthenticatedFamilyMember(authFamily, "usr_unknown_456"), undefined);
+    assert.equal(getAuthenticatedFamilyMember(authFamily, null), undefined);
+    assert.equal(getAuthenticatedFamilyMember(authFamily, undefined), undefined);
+  });
+
+  test("8. Deterministic legacy migration: links single clear candidate, rejects ambiguity and children", () => {
+    // 1. Clear candidate with profile name match
+    const legacyFamily: FamilyMember[] = [
+      { id: "mem_usman", name: "Usman", role: "child", chores: [] },
+      { id: "mem_shahid", name: "Shahid", role: "admin", chores: [] },
+    ];
+    const { family: migrated1, linkedMember: linked1 } = migrateAuthFamilyMemberLink(
+      legacyFamily,
+      "usr_shahid_123",
+      "Shahid"
+    );
+    assert.ok(linked1);
+    assert.equal(linked1.id, "mem_shahid");
+    assert.equal(linked1.linkedUserId, "usr_shahid_123");
+    assert.equal(migrated1.find((m) => m.id === "mem_usman")?.linkedUserId, undefined, "Usman is never linked");
+
+    // 2. Idempotency test — running again yields same result
+    const { linkedMember: linkedAgain } = migrateAuthFamilyMemberLink(
+      migrated1,
+      "usr_shahid_123",
+      "Shahid"
+    );
+    assert.equal(linkedAgain?.id, "mem_shahid");
+
+    // 3. Ambiguous household (multiple admins, empty profile name) -> do NOT guess
+    const ambiguousFamily: FamilyMember[] = [
+      { id: "mem_admin_1", name: "Parent 1", role: "admin", chores: [] },
+      { id: "mem_admin_2", name: "Parent 2", role: "admin", chores: [] },
+    ];
+    const { linkedMember: linkedAmbiguous } = migrateAuthFamilyMemberLink(
+      ambiguousFamily,
+      "usr_new",
+      ""
+    );
+    assert.equal(linkedAmbiguous, undefined, "Ambiguous candidates must not be guessed");
+
+    // 4. Child-only household -> returns unlinked (never link a child)
+    const childOnly: FamilyMember[] = [
+      { id: "mem_child", name: "Usman", role: "child", chores: [] },
+    ];
+    const { linkedMember: linkedChild } = migrateAuthFamilyMemberLink(
+      childOnly,
+      "usr_new",
+      "Shahid"
+    );
+    assert.equal(linkedChild, undefined, "Child must never be linked as authenticated user");
+  });
+
+  test("9. JSON serialization, backup, and restore preserves linkedUserId", () => {
+    const originalMember: FamilyMember = {
+      id: "mem_shahid",
+      name: "Shahid",
+      role: "admin",
+      linkedUserId: "usr_auth_999",
+      chores: [],
+    };
+    const serialized = JSON.stringify([originalMember]);
+    const restored: FamilyMember[] = JSON.parse(serialized);
+
+    assert.equal(restored[0]?.linkedUserId, "usr_auth_999");
+    const resolved = getAuthenticatedFamilyMember(restored, "usr_auth_999");
+    assert.equal(resolved?.id, "mem_shahid");
+  });
+
+  test("10. Task creation assignment scoping in ME vs Household vs Child contexts", () => {
+    const tasks: TaskRecord[] = [];
+
+    // 1. Task created in Shahid context (assignedTo: mem_shahid)
+    const taskShahid: TaskRecord = {
+      id: "t_1",
+      title: "Review work reports",
+      done: false,
+      date: "2026-08-18",
+      assignedTo: "mem_shahid",
+    };
+
+    // 2. Task created in Household context (assignedTo: undefined)
+    const taskHousehold: TaskRecord = {
+      id: "t_2",
+      title: "Buy whole milk",
+      done: false,
+      date: "2026-08-18",
+    };
+
+    // 3. Task created in Usman context (assignedTo: mem_usman)
+    const taskUsman: TaskRecord = {
+      id: "t_3",
+      title: "Clean study desk",
+      done: false,
+      date: "2026-08-18",
+      assignedTo: "mem_usman",
+    };
+
+    tasks.push(taskShahid, taskHousehold, taskUsman);
+
+    // Household perspective sees all 3 tasks
+    assert.equal(filterTasksForMember(tasks, undefined).length, 3);
+
+    // Shahid perspective sees his own task + household task (2 tasks)
+    const shahidTasks = filterTasksForMember(tasks, "mem_shahid");
+    assert.equal(shahidTasks.length, 2);
+    assert.ok(shahidTasks.some((t) => t.id === "t_1"));
+    assert.ok(shahidTasks.some((t) => t.id === "t_2"));
+    assert.equal(shahidTasks.some((t) => t.id === "t_3"), false);
+
+    // Usman perspective sees his own task + household task (2 tasks)
+    const usmanTasks = filterTasksForMember(tasks, "mem_usman");
+    assert.equal(usmanTasks.length, 2);
+    assert.ok(usmanTasks.some((t) => t.id === "t_3"));
+    assert.ok(usmanTasks.some((t) => t.id === "t_2"));
+    assert.equal(usmanTasks.some((t) => t.id === "t_1"), false);
+  });
 });
+
 
 
 

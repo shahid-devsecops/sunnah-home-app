@@ -20,6 +20,7 @@ export interface FamilyMember {
   color?: string | undefined;
   avatar?: string | undefined;
   chores: Chore[]; // kept for backward compatibility with current routine workflows
+  linkedUserId?: string | undefined; // Supabase auth.users.id
 }
 
 /** Storage key for active perspective/view filter */
@@ -62,8 +63,9 @@ export function isChildMember(memberId?: string | null, family?: FamilyMember[] 
  * Persists in local storage under `veedu:selected_member_id`.
  * 
  * Default Authenticated Experience:
- * - Fresh load / no stored preference: defaults to the primary authenticated FamilyMember (ME perspective).
- * - If no family or no primary member: defaults to undefined (Household).
+ * - Resolves authenticated FamilyMember via `linkedUserId === auth.user.id`.
+ * - Fresh load / no stored preference: defaults to the authenticated FamilyMember (ME perspective).
+ * - If no family or no linked member: defaults safely to undefined (Household).
  * - Explicit "household" selection: returns undefined (Household).
  * - Explicit member selection (e.g. child or spouse): returns that member's ID.
  * - NEVER defaults to a child automatically.
@@ -74,12 +76,38 @@ export function useSelectedMember(): [
   FamilyMember | undefined
 ] {
   const [selectedId, setSelectedId] = useStore<string | undefined>(SELECTED_MEMBER_KEY, undefined);
-  const [family] = useStore<FamilyMember[]>("family", []);
+  const [family, setFamily] = useStore<FamilyMember[]>("family", []);
+  const [account] = useStore<{ id?: string; email: string } | null>("account", null);
   const [profile] = useStore<{ name?: string }>("profile", {});
 
-  const primaryMember = useMemo(
-    () => getPrimaryFamilyMember(family, profile?.name),
-    [family, profile?.name]
+  const authUserId = account?.id;
+
+  // Auto-migrate legacy unlinked family member if applicable
+  useEffect(() => {
+    if (authUserId && family.length > 0) {
+      const alreadyLinked = getAuthenticatedFamilyMember(family, authUserId);
+      if (!alreadyLinked) {
+        const { family: migratedFamily, linkedMember } = migrateAuthFamilyMemberLink(
+          family,
+          authUserId,
+          profile?.name
+        );
+        if (linkedMember && migratedFamily !== family) {
+          setFamily(migratedFamily);
+        }
+      }
+    }
+  }, [authUserId, family, profile?.name, setFamily]);
+
+  const authenticatedMember = useMemo(
+    () => getAuthenticatedFamilyMember(family, authUserId),
+    [family, authUserId]
+  );
+
+  // Fallback for unlinked/offline guest sessions
+  const primaryFallback = useMemo(
+    () => authenticatedMember ?? getPrimaryFamilyMember(family, profile?.name),
+    [authenticatedMember, family, profile?.name]
   );
 
   const activeMember = useMemo(() => {
@@ -92,12 +120,12 @@ export function useSelectedMember(): [
       const match = family.find((m) => m && m.id === selectedId);
       if (match) return match;
     }
-    // If no preference stored (undefined): default to primary authenticated member
+    // If no preference stored (undefined): default to authenticated member (or primary fallback)
     if (selectedId === undefined) {
-      return primaryMember;
+      return primaryFallback;
     }
     return undefined;
-  }, [selectedId, family, primaryMember]);
+  }, [selectedId, family, primaryFallback]);
 
   const effectiveId = activeMember ? activeMember.id : undefined;
 
@@ -292,6 +320,108 @@ export type MemberPersonalDomain = (typeof MEMBER_PERSONAL_DOMAINS)[number];
 export function getMemberStoreKey(memberId: string, domain: string): string {
   const cleanId = memberId.startsWith("mem_") ? memberId.slice(4) : memberId;
   return `mem_${cleanId}:${domain}`;
+}
+
+/**
+ * Authoritative pure resolver linking Supabase auth.users.id to FamilyMember.
+ * Rules:
+ * 1. Exact linkedUserId match -> return member.
+ * 2. No auth user -> undefined.
+ * 3. If no linked match -> undefined (Never guess or randomly pick a member).
+ */
+export function getAuthenticatedFamilyMember(
+  family?: FamilyMember[] | null,
+  authUserId?: string | null
+): FamilyMember | undefined {
+  if (!family || family.length === 0 || !authUserId || !authUserId.trim()) {
+    return undefined;
+  }
+  const trimmedId = authUserId.trim();
+  return family.find((m) => m && m.linkedUserId === trimmedId);
+}
+
+/**
+ * Deterministic legacy migration helper to establish linkedUserId ONCE if there is exactly
+ * one safe adult candidate.
+ * 
+ * Rules:
+ * - If already linked -> return existing link.
+ * - Filter candidate pool: ONLY adult/non-child members with no existing other linkedUserId.
+ * - If profile name matches exactly 1 available adult -> link that member.
+ * - If no profile match, but exactly 1 admin exists in available adults -> link that admin.
+ * - If exactly 1 adult in the entire family -> link that adult.
+ * - If ambiguous (multiple candidates or zero matches) -> return unlinked without guessing.
+ * - Idempotent and pure.
+ */
+export function migrateAuthFamilyMemberLink(
+  family?: FamilyMember[] | null,
+  authUserId?: string | null,
+  profileName?: string | null
+): { family: FamilyMember[]; linkedMember: FamilyMember | undefined } {
+  if (!family || family.length === 0) {
+    return { family: family ?? [], linkedMember: undefined };
+  }
+  if (!authUserId || !authUserId.trim()) {
+    return { family, linkedMember: undefined };
+  }
+  const trimmedId = authUserId.trim();
+
+  // 1. If already linked, return existing
+  const existingLinked = family.find((m) => m && m.linkedUserId === trimmedId);
+  if (existingLinked) {
+    return { family, linkedMember: existingLinked };
+  }
+
+  // 2. Filter candidates: ONLY adult / non-child members with no existing other linkedUserId
+  const availableAdults = family.filter(
+    (m) => m && getCanonicalFamilyRole(m.role) !== "child" && !m.linkedUserId
+  );
+
+  if (availableAdults.length === 0) {
+    // Ambiguous or only children exist -> do NOT guess, return unlinked
+    return { family, linkedMember: undefined };
+  }
+
+  let matchedMember: FamilyMember | undefined;
+
+  // 3. Try profile name match among available adults
+  if (profileName && profileName.trim()) {
+    const norm = profileName.trim().toLowerCase();
+    const nameMatches = availableAdults.filter(
+      (m) => m.name && m.name.trim().toLowerCase() === norm
+    );
+    if (nameMatches.length === 1) {
+      matchedMember = nameMatches[0];
+    }
+  }
+
+  // 4. If no single profile name match, check if there is exactly 1 admin in available adults
+  if (!matchedMember) {
+    const adminMatches = availableAdults.filter(
+      (m) => getCanonicalFamilyRole(m.role) === "admin"
+    );
+    if (adminMatches.length === 1) {
+      matchedMember = adminMatches[0];
+    }
+  }
+
+  // 5. If no admin match, check if there is exactly 1 adult in the entire family
+  if (!matchedMember && availableAdults.length === 1) {
+    matchedMember = availableAdults[0];
+  }
+
+  // 6. If ambiguous (multiple candidates or zero matches), do NOT guess
+  if (!matchedMember) {
+    return { family, linkedMember: undefined };
+  }
+
+  // Apply link idempotently
+  const updatedFamily = family.map((m) =>
+    m.id === matchedMember!.id ? { ...m, linkedUserId: trimmedId } : m
+  );
+  const linkedMember = updatedFamily.find((m) => m.id === matchedMember!.id);
+
+  return { family: updatedFamily, linkedMember };
 }
 
 /**

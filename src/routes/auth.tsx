@@ -47,7 +47,7 @@ function AuthPage() {
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [account, setAccount] = useStore<{ email: string } | null>("account", null);
+  const [account, setAccount] = useStore<{ id?: string; email: string } | null>("account", null);
   const [profile] = useStore("profile", {
     name: "",
     city: "Kozhikode",
@@ -121,7 +121,7 @@ function AuthPage() {
                   alert(error.message);
                   return;
                 }
-                if (data.user) setAccount({ email: data.user.email! });
+                if (data.user) setAccount({ id: data.user.id, email: data.user.email! });
                 navigate({ to: "/onboarding" });
                 return;
               }
@@ -135,7 +135,7 @@ function AuthPage() {
                   alert(error.message);
                   return;
                 }
-                if (data.user) setAccount({ email: data.user.email! });
+                if (data.user) setAccount({ id: data.user.id, email: data.user.email! });
 
                 await syncFromCloud();
 
