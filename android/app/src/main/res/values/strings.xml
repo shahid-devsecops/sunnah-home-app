@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sunnah Home</string>
+    <string name="title_activity_main">Sunnah Home</string>
+    <string name="package_name">com.sunnahhome.app</string>
+    <string name="custom_url_scheme">com.sunnahhome.app</string>
+</resources>

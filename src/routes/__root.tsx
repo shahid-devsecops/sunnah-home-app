@@ -10,6 +10,9 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useEffect, type ReactNode } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
+import { supabase } from "../lib/supabase";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -205,6 +208,34 @@ function RootComponent() {
     registerServiceWorker();
   }, []);
 
+  // Handle Google OAuth deep link redirects on Android (Task 5)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let listenerHandle: { remove: () => void } | null = null;
+
+    CapacitorApp.addListener("appUrlOpen", async (event) => {
+      const url = event.url;
+      if (!url.includes("auth/callback")) return;
+
+      try {
+        const parsed = new URL(url);
+        const code = parsed.searchParams.get("code");
+        if (code) {
+          await supabase.auth.exchangeCodeForSession(code);
+        }
+      } catch (err) {
+        console.error("[Capacitor] Failed to exchange auth code:", err);
+      }
+    }).then((handle) => {
+      listenerHandle = handle;
+    });
+
+    return () => {
+      listenerHandle?.remove();
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider
@@ -219,3 +250,29 @@ function RootComponent() {
   );
 }
 
+/**
+ * Hook: Google OAuth sign-in with the correct redirect URL for the current platform.
+ *
+ * Usage (Task 6):
+ *   const signInWithGoogle = useGoogleSignIn();
+ *   <button onClick={signInWithGoogle}>Sign in with Google</button>
+ *
+ * On native Android: redirects to com.sunnahhome.app://auth/callback (deep link).
+ * On web: redirects to https://firdous-home.netlify.app/auth/callback.
+ */
+export function useGoogleSignIn() {
+  return async () => {
+    const redirectTo = Capacitor.isNativePlatform()
+      ? "com.sunnahhome.app://auth/callback"
+      : "https://firdous-home.netlify.app/auth/callback";
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+
+    if (error) {
+      console.error("[Auth] Google sign-in error:", error.message);
+    }
+  };
+}
