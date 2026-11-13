@@ -1,0 +1,67 @@
+/* SUNNAH HOME — single theme file (Vibrant Sunnah, Material 3 roles).
+ * Every value is a named token; maps 1:1 to Compose ColorScheme / Typography / Shapes. */
+.sh {
+  --sh-primary: #006C4C; --sh-on-primary: #FFFFFF;
+  --sh-primary-container: #89F8C7; --sh-on-primary-container: #002114;
+  --sh-secondary: #8A5A00; --sh-on-secondary: #FFFFFF;
+  --sh-secondary-container: #FFDDB0; --sh-on-secondary-container: #2C1800;
+  --sh-background: #FBFDF9; --sh-on-background: #191C1A;
+  --sh-surface: #FBFDF9; --sh-on-surface: #191C1A;
+  --sh-surface-variant: #DCE5DD; --sh-on-surface-variant: #404943;
+  --sh-surface-container: #EEF3EE;
+  --sh-outline: #707973; --sh-outline-variant: #BFC9C1;
+  --sh-success: #1B7F3B; --sh-warning: #9A6700; --sh-error: #BA1A1A; --sh-on-error: #FFFFFF;
+  --sh-font: "Plus Jakarta Sans", system-ui, sans-serif;
+  --sh-font-ar: "Noto Naskh Arabic", serif;
+  --sh-elev-1: 0 1px 2px rgb(0 0 0 / .3), 0 1px 3px 1px rgb(0 0 0 / .15);
+  --sh-elev-2: 0 1px 2px rgb(0 0 0 / .3), 0 2px 6px 2px rgb(0 0 0 / .15);
+  --sh-elev-3: 0 4px 8px 3px rgb(0 0 0 / .15), 0 1px 3px rgb(0 0 0 / .3);
+  background: var(--sh-background); color: var(--sh-on-background); font-family: var(--sh-font);
+}
+.sh.sh-dark {
+  --sh-primary: #6CDBAC; --sh-on-primary: #003826;
+  --sh-primary-container: #005138; --sh-on-primary-container: #89F8C7;
+  --sh-secondary: #FFB94C; --sh-on-secondary: #4A2800;
+  --sh-secondary-container: #693C00; --sh-on-secondary-container: #FFDDB0;
+  --sh-background: #191C1A; --sh-on-background: #E1E3DF;
+  --sh-surface: #191C1A; --sh-on-surface: #E1E3DF;
+  --sh-surface-variant: #404943; --sh-on-surface-variant: #BFC9C1;
+  --sh-surface-container: #232724;
+  --sh-outline: #8A938C; --sh-outline-variant: #404943;
+  --sh-success: #7EDB95; --sh-warning: #FFC65C; --sh-error: #FFB4AB; --sh-on-error: #690005;
+}
+.sh [lang="ar"], .sh[dir="rtl"] { font-family: var(--sh-font-ar), var(--sh-font); }
+
+@theme inline {
+  --color-sh-primary: var(--sh-primary); --color-sh-on-primary: var(--sh-on-primary);
+  --color-sh-primary-container: var(--sh-primary-container); --color-sh-on-primary-container: var(--sh-on-primary-container);
+  --color-sh-secondary: var(--sh-secondary); --color-sh-on-secondary: var(--sh-on-secondary);
+  --color-sh-secondary-container: var(--sh-secondary-container); --color-sh-on-secondary-container: var(--sh-on-secondary-container);
+  --color-sh-bg: var(--sh-background); --color-sh-surface: var(--sh-surface); --color-sh-on-surface: var(--sh-on-surface);
+  --color-sh-surface-variant: var(--sh-surface-variant); --color-sh-on-surface-variant: var(--sh-on-surface-variant);
+  --color-sh-container: var(--sh-surface-container);
+  --color-sh-outline: var(--sh-outline); --color-sh-outline-variant: var(--sh-outline-variant);
+  --color-sh-success: var(--sh-success); --color-sh-warning: var(--sh-warning);
+  --color-sh-error: var(--sh-error); --color-sh-on-error: var(--sh-on-error);
+}
+/* Type scale (M3) */
+@utility sh-display { font-size: 36px; line-height: 44px; font-weight: 600; }
+@utility sh-headline { font-size: 28px; line-height: 36px; font-weight: 600; }
+@utility sh-title { font-size: 20px; line-height: 28px; font-weight: 600; }
+@utility sh-title-sm { font-size: 16px; line-height: 24px; font-weight: 600; }
+@utility sh-body { font-size: 16px; line-height: 24px; font-weight: 400; }
+@utility sh-body-sm { font-size: 14px; line-height: 20px; font-weight: 400; }
+@utility sh-label { font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: .1px; }
+@utility sh-label-sm { font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .5px; }
+@utility sh-arabic { font-family: var(--sh-font-ar); font-size: 22px; line-height: 40px; }
+/* Shapes */
+@utility sh-r-xs { border-radius: 4px; }
+@utility sh-r-sm { border-radius: 8px; }
+@utility sh-r-md { border-radius: 12px; }
+@utility sh-r-lg { border-radius: 16px; }
+@utility sh-r-xl { border-radius: 28px; }
+@utility sh-r-full { border-radius: 9999px; }
+@utility sh-elev-1 { box-shadow: var(--sh-elev-1); }
+@utility sh-elev-2 { box-shadow: var(--sh-elev-2); }
+@utility sh-elev-3 { box-shadow: var(--sh-elev-3); }
+@utility sh-touch { min-height: 48px; min-width: 48px; }
