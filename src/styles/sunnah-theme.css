@@ -65,3 +65,5 @@
 @utility sh-elev-2 { box-shadow: var(--sh-elev-2); }
 @utility sh-elev-3 { box-shadow: var(--sh-elev-3); }
 @utility sh-touch { min-height: 48px; min-width: 48px; }
+.sh h1, .sh h2, .sh h3, .sh p, .sh button { font-family: inherit; }
+@source inline("bg-sh-{primary,primary-container,secondary,secondary-container,bg,container,surface-variant,outline,success,warning,error}");
