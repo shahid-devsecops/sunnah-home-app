@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Check, ChevronRight, Flame, Home, ListChecks, BarChart3, Settings, Bell, Plus, X } from "lucide-react";
+import { Check, ChevronRight, Flame, Home, ListChecks, BarChart3, Settings, Bell, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/styleguide")({
   head: () => ({
@@ -230,5 +230,16 @@ function HabitTile({ title, time, streak, done: d0 }: { title: string; time: str
         <span className={`size-7 sh-r-full grid place-items-center border-2 ${done ? "bg-sh-primary border-sh-primary text-sh-on-primary" : "border-sh-outline"}`}>{done && <Check className="size-4" />}</span>
       </button>
     </div>
+  );
+}
+function Toggle({ label }: { label: string }) {
+  const [on, setOn] = useState(true);
+  return (
+    <button role="switch" aria-checked={on} onClick={() => setOn(!on)} className="w-full sh-touch flex items-center justify-between">
+      <span className="sh-body">{label}</span>
+      <span className={`h-8 w-[52px] sh-r-full flex items-center px-1 border-2 ${on ? "bg-sh-primary border-sh-primary justify-end" : "bg-sh-surface-variant border-sh-outline justify-start"}`}>
+        <span className={`sh-r-full ${on ? "size-6 bg-sh-on-primary" : "size-4 bg-sh-outline"}`} />
+      </span>
+    </button>
   );
 }
