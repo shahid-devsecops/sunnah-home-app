@@ -2,6 +2,7 @@
 @source "../src";
 @import "tw-animate-css";
 @import "./styles/themes.css";
+@import "./styles/sunnah-theme.css";
 
 @custom-variant dark (&:is(.dark *));
 
